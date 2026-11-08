@@ -59,7 +59,10 @@ public struct ForgeHost: Codable, Hashable, Sendable, Identifiable {
 
     /// A bare `name` or `name:port`. No scheme, credentials, path, query or
     /// fragment can survive this: those characters are not in the allowed set.
-    static func isValidHost(_ value: String) -> Bool {
+    ///
+    /// Public because `AgentSendLink` lives in the app and validates the host
+    /// it parsed out of an `agent-send://` link with the same rule.
+    public static func isValidHost(_ value: String) -> Bool {
         guard !value.isEmpty, value.count <= 260,
               value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
               value.rangeOfCharacter(from: .controlCharacters) == nil else { return false }

@@ -126,6 +126,21 @@ final class ForgeHostTests: XCTestCase {
         XCTAssertEqual(host.apiBase.absoluteString, "https://git.example.com:8443/api/v1/")
     }
 
+    /// `AgentSendLink` lives in the app and calls this directly, so its strict
+    /// bare-host rule is public contract, not an implementation detail.
+    func testBareHostValidationAcceptsOnlyAHostAndOptionalPort() {
+        for input in ["git.example.com", "git.example.com:8443", "internal_host", "a-b.example.com"] {
+            XCTAssertTrue(ForgeHost.isValidHost(input), input)
+        }
+        for input in ["", "https://git.example.com", "http://git.example.com",
+                      "git.example.com/path", "git.example.com?x=1", "git.example.com#top",
+                      "a@git.example.com", "git boy.example.com", "git.example.com:0",
+                      "git.example.com:70000", "-git.example.com", "git-.example.com",
+                      "git.example.com:http"] {
+            XCTAssertFalse(ForgeHost.isValidHost(input), input)
+        }
+    }
+
     func testCapabilitiesDifferPerHost() {
         let gitboy = GitboyClient(host: .testGitboy, token: nil)
         XCTAssertEqual(gitboy.capabilities,

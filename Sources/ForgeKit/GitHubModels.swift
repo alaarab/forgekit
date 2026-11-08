@@ -6,6 +6,12 @@ public struct GitHubUser: Codable, Equatable, Sendable {
     public let name: String?
     public let avatarUrl: String?
 
+    public init(login: String, name: String?, avatarUrl: String?) {
+        self.login = login
+        self.name = name
+        self.avatarUrl = avatarUrl
+    }
+
     enum CodingKeys: String, CodingKey {
         case login, name
         case avatarUrl = "avatar_url"
@@ -23,12 +29,33 @@ public struct GitHubRepo: Codable, Equatable, Identifiable, Sendable {
     public let pushedAt: String?
     public let permissions: Permissions?
 
+    public init(id: Int, fullName: String, name: String, owner: Owner,
+                isPrivate: Bool, defaultBranch: String, pushedAt: String?,
+                permissions: Permissions?) {
+        self.id = id
+        self.fullName = fullName
+        self.name = name
+        self.owner = owner
+        self.isPrivate = isPrivate
+        self.defaultBranch = defaultBranch
+        self.pushedAt = pushedAt
+        self.permissions = permissions
+    }
+
     public struct Owner: Codable, Equatable, Sendable {
         public let login: String
+
+        public init(login: String) {
+            self.login = login
+        }
     }
 
     public struct Permissions: Codable, Equatable, Sendable {
         public let push: Bool
+
+        public init(push: Bool) {
+            self.push = push
+        }
     }
 
     enum CodingKeys: String, CodingKey {
@@ -127,7 +154,10 @@ public enum GitHubError: Error, LocalizedError, Sendable {
 
     /// `repos/<owner>/<name>/…` → `<owner>/<name>`; nil for user/auth paths,
     /// which no amount of repository scoping would fix.
-    static func repoSlug(from path: String?) -> String? {
+    ///
+    /// Public because the app's client tests assert the classification
+    /// directly; the error wording uses it too.
+    public static func repoSlug(from path: String?) -> String? {
         guard let path else { return nil }
         let withoutQuery = path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? path
         let parts = withoutQuery.split(separator: "/").map(String.init)

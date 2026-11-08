@@ -85,8 +85,13 @@ what PhrenKit catches.
   code can use those too.
 - `GitHubUser` and `GitHubRepo` — delete from
   `Sources/PhrenKit/GitHub/GitHubModels.swift`; ForgeKit's copies carry the
-  same fields. Keep `GitRef`, `GitTree`, `GitBlob`, `ContentsPutResponse` and
-  `DeviceCodeResponse` in PhrenKit; they are not part of the forge layer.
+  same fields and public memberwise initializers (`GitHubUser(login:name:
+  avatarUrl:)`, `GitHubRepo(id:fullName:name:owner:isPrivate:defaultBranch:
+  pushedAt:permissions:)`, `GitHubRepo.Owner(login:)` and
+  `GitHubRepo.Permissions(push:)`), so `GitHubReposTests` and
+  `SessionRecoveryTests` keep compiling unchanged. Keep `GitRef`, `GitTree`,
+  `GitBlob`, `ContentsPutResponse` and `DeviceCodeResponse` in PhrenKit; they
+  are not part of the forge layer.
 - GitHub wire DTOs — delete these definitions from PhrenKit and use
   ForgeKit's public copies:
   - `GitHubClient+Issues.swift`: `GitHubIssueDTO`,
@@ -104,6 +109,26 @@ what PhrenKit catches.
 
 `ISO8601Dates` is **not** exported by ForgeKit (its parser is internal), so
 PhrenKit keeps its own `Sessions/ISO8601Dates.swift` unchanged.
+
+### Symbols that stay public for PhrenKit
+
+These are used by PhrenKit code or tests that stay in the app. Keep them in
+your call sites and do not delete the tests that exercise them:
+
+- `ForgeHost.isValidHost(_:)` — public static; `AgentSendLink.swift` calls it
+  to validate the bare host it parsed from an `agent-send://` URL.
+- `GitHubError.repoSlug(from:)` — public static;
+  `PhrenKitTests/GitHubClientTests.swift` asserts the path classification
+  directly (lines 163–164). It is also what `errorDescription` uses.
+- `GitHubUser(login:name:avatarUrl:)`,
+  `GitHubRepo(id:fullName:name:owner:isPrivate:defaultBranch:pushedAt:
+  permissions:)`, `GitHubRepo.Owner(login:)` and
+  `GitHubRepo.Permissions(push:)` — public memberwise initializers;
+  `GitHubReposTests.swift:91` and `SessionRecoveryTests.swift:396` construct
+  these. The synthesized parameter labels and order are unchanged.
+
+All other `Forge*` models already had public initializers in PhrenKit and keep
+them in ForgeKit.
 
 ## 5. Conform GitHubClient to GitHubTransport
 
