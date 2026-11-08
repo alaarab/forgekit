@@ -1,0 +1,59 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
+/// The GitHub requests the forge layer makes. This is deliberately the whole
+/// surface `GitHubForge` uses — no file contents, refs, or sign-in — so a host
+/// app can conform its existing client with a set of forwards instead of
+/// adopting ForgeKit's transport.
+///
+/// ForgeKit's own conformer is ``GitHubHTTPTransport``. A host app can
+/// conform its existing client instead; see `PHRENKIT_ADAPTER.md`.
+public protocol GitHubTransport: Sendable {
+    // Identity + repos
+    func currentUser() async throws -> GitHubUser
+    func listRepos(page: Int, perPage: Int) async throws -> [GitHubRepo]
+
+    // Issues
+    func listIssues(owner: String, repo: String, state: ForgeStateFilter,
+                    page: Int, perPage: Int) async throws -> [GitHubIssueDTO]
+    func searchIssues(owner: String, repo: String, state: ForgeStateFilter,
+                      query: String, page: Int, perPage: Int) async throws -> [GitHubIssueDTO]
+    func issue(owner: String, repo: String, number: Int) async throws -> GitHubIssueDTO
+    func issueComments(owner: String, repo: String, number: Int) async throws -> [GitHubIssueCommentDTO]
+    func createIssue(owner: String, repo: String, title: String,
+                     body: String) async throws -> GitHubIssueDTO
+    func createIssueComment(owner: String, repo: String, number: Int,
+                            body: String) async throws -> GitHubIssueCommentDTO
+    func setIssueState(owner: String, repo: String, number: Int,
+                       state: ForgeIssueState) async throws -> GitHubIssueDTO
+
+    // Pull requests
+    func listPulls(owner: String, repo: String, state: ForgeStateFilter,
+                   page: Int, perPage: Int) async throws -> [GitHubPullDTO]
+    func pull(owner: String, repo: String, number: Int) async throws -> GitHubPullDTO
+    func pullReviews(owner: String, repo: String, number: Int) async throws -> [GitHubPullReviewDTO]
+    func checkRuns(owner: String, repo: String, sha: String) async throws -> [GitHubCheckRunDTO]
+    func mergePull(owner: String, repo: String, number: Int,
+                   method: ForgeMergeMethod,
+                   expectedHeadSHA: String) async throws -> (Data, HTTPURLResponse)
+    func submitPullReview(owner: String, repo: String, number: Int,
+                          event: String, body: String,
+                          expectedHeadSHA: String) async throws
+
+    // Actions
+    func workflowRuns(owner: String, repo: String, branch: String?,
+                      page: Int, perPage: Int) async throws -> [GitHubRunDTO]
+    func workflowRun(owner: String, repo: String, runID: String) async throws -> GitHubRunDTO
+    func workflowRunJobs(owner: String, repo: String, runID: String) async throws -> [GitHubJobDTO]
+    func rerunRun(owner: String, repo: String, runID: String) async throws
+    func rerunFailedJobs(owner: String, repo: String, runID: String) async throws
+    func cancelRun(owner: String, repo: String, runID: String) async throws
+    func rerunJob(owner: String, repo: String, jobID: String) async throws
+    func jobLog(owner: String, repo: String, jobID: String) async throws -> String
+
+    // Runners
+    func runners(scope: ForgeRunnerScope) async throws -> [GitHubRunnerDTO]
+    func removeRunner(scope: ForgeRunnerScope, runnerID: String) async throws
+}
