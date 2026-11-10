@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
 
 ### Changed
 
@@ -14,6 +14,10 @@
   not gitboy's on `requestCode()` now says the address doesn't answer like a
   gitboy server, instead of "not found" or an unreadable response. Throttling
   (429) and server errors (5xx) keep their own cases.
+
+### Upgrading from 0.3.0
+
+- Only the pin changes. No API was added, removed or renamed.
 
 ## 0.3.0
 

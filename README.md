@@ -62,7 +62,7 @@ redirect and throttling rules exist once.
 Add the package with an exact version, not a range:
 
 ```swift
-.package(url: "https://github.com/alaarab/forgekit.git", exact: "0.3.0")
+.package(url: "https://github.com/alaarab/forgekit.git", exact: "0.3.1")
 ```
 
 and the target dependency:
