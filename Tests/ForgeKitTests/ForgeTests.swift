@@ -20,12 +20,21 @@ final class ForgeHeaderRecorder: URLProtocol {
     nonisolated(unsafe) private static var recordedRequests: [Recorded] = []
     nonisolated(unsafe) private static var status = 200
     nonisolated(unsafe) private static var responseBody = "{}"
+    /// Answers for the requests after the first, in order; the last one
+    /// repeats once the queue runs out.
+    nonisolated(unsafe) private static var queued: [(status: Int, body: String)] = []
 
     static func reset(status: Int = 200, body: String = "{}") {
         lock.lock(); defer { lock.unlock() }
         recordedRequests = []
+        queued = []
         self.status = status
         self.responseBody = body
+    }
+
+    static func queue(status: Int, body: String) {
+        lock.lock(); defer { lock.unlock() }
+        queued.append((status, body))
     }
 
     static var requests: [Recorded] {
@@ -53,6 +62,11 @@ final class ForgeHeaderRecorder: URLProtocol {
             body: Self.bodyText(request)))
         let status = Self.status
         let payload = Self.responseBody
+        if !Self.queued.isEmpty {
+            let next = Self.queued.removeFirst()
+            Self.status = next.status
+            Self.responseBody = next.body
+        }
         Self.lock.unlock()
 
         guard let url = request.url,
@@ -434,16 +448,13 @@ final class GitboyDeviceFlowTests: XCTestCase {
             + completeField + #","expires_in":600,"interval":5}"#
     }
 
-    private func requestCodeError() async -> ForgeError? {
+    private func requestCodeError() async -> Error? {
         do {
             _ = try await makeFlow().requestCode()
             XCTFail("Expected requestCode to throw")
             return nil
-        } catch let error as ForgeError {
-            return error
         } catch {
-            XCTFail("Expected a ForgeError, got \(error)")
-            return nil
+            return error
         }
     }
 
@@ -461,7 +472,7 @@ final class GitboyDeviceFlowTests: XCTestCase {
             StubURLProtocol.reset()
             StubURLProtocol.stub("auth/device/code", status: 200, body: deviceCodeJSON(page: page))
             let error = await requestCodeError()
-            XCTAssertEqual(error, GitboyDeviceFlow.foreignApprovalPage, page)
+            XCTAssertEqual(error as? GitboySignInError, .approvalPageElsewhere(URL(string: page)!), page)
         }
 
         // The short link is checked too, not only the page.
@@ -470,7 +481,10 @@ final class GitboyDeviceFlowTests: XCTestCase {
                              body: deviceCodeJSON(page: "https://gitboy.example.com/device",
                                                   complete: "https://evil.example.com/device?code=ABCD-1234"))
         let error = await requestCodeError()
-        XCTAssertEqual(error, GitboyDeviceFlow.foreignApprovalPage)
+        XCTAssertEqual(error as? GitboySignInError,
+                       .approvalPageElsewhere(URL(string: "https://evil.example.com/device?code=ABCD-1234")!))
+        XCTAssertTrue(error?.localizedDescription.contains("evil.example.com") == true,
+                      "The message names the address it was sent to")
     }
 
     /// A host name that reaches some other server is told apart from a
@@ -486,7 +500,7 @@ final class GitboyDeviceFlowTests: XCTestCase {
             StubURLProtocol.reset()
             StubURLProtocol.stub("auth/device/code", status: answer.status, body: answer.body)
             let error = await requestCodeError()
-            XCTAssertEqual(error, GitboyDeviceFlow.notGitboy, "HTTP \(answer.status) \(answer.body)")
+            XCTAssertEqual(error as? GitboySignInError, .notGitboyServer, "HTTP \(answer.status) \(answer.body)")
         }
     }
 
@@ -494,7 +508,7 @@ final class GitboyDeviceFlowTests: XCTestCase {
     func testRequestCodeKeepsThrottlingAndServerErrorsDistinct() async {
         StubURLProtocol.stub("auth/device/code", status: 429, headers: ["Retry-After": "60"],
                              body: #"{"error":"Too many requests"}"#)
-        guard case .rateLimited(let until) = await requestCodeError() else {
+        guard case .rateLimited(let until) = await requestCodeError() as? ForgeError else {
             return XCTFail("Expected .rateLimited")
         }
         XCTAssertNotNil(until)
@@ -502,7 +516,7 @@ final class GitboyDeviceFlowTests: XCTestCase {
         StubURLProtocol.reset()
         StubURLProtocol.stub("auth/device/code", status: 503, body: #"{"error":"Database unavailable"}"#)
         let error = await requestCodeError()
-        XCTAssertEqual(error, .server(status: 503, message: "Database unavailable"))
+        XCTAssertEqual(error as? ForgeError, .server(status: 503, message: "Database unavailable"))
     }
 
     /// Sign-in answers are a few hundred bytes. One that keeps coming is cut
@@ -511,7 +525,7 @@ final class GitboyDeviceFlowTests: XCTestCase {
         let padding = String(repeating: "x", count: GitboyDeviceFlow.responseLimit + 1)
         StubURLProtocol.stub("auth/device/code", status: 200, body: #"{"padding":"\#(padding)"}"#)
         let onCode = await requestCodeError()
-        XCTAssertEqual(onCode, .invalidResponse)
+        XCTAssertEqual(onCode as? GitboySignInError, .responseTooLarge)
 
         StubURLProtocol.reset()
         StubURLProtocol.stub("auth/device/token", status: 400, body: #"{"error":"\#(padding)"}"#)
@@ -519,8 +533,32 @@ final class GitboyDeviceFlowTests: XCTestCase {
             _ = try await makeFlow().poll(deviceCode: "device-1")
             XCTFail("Expected the oversized poll answer to be refused")
         } catch {
-            XCTAssertEqual(error as? ForgeError, .invalidResponse)
+            XCTAssertEqual(error as? GitboySignInError, .responseTooLarge)
         }
+    }
+
+    /// RFC 8628: the interval may be left out (5 seconds), and `slow_down`
+    /// without one adds 5 seconds to the interval in use.
+    func testIntervalDefaultsAndSlowDownAddsFiveSeconds() async throws {
+        let code = try JSONDecoder().decode(GitboyDeviceCode.self, from: Data(#"""
+        {"device_code":"d","user_code":"U","verification_uri":"https://gitboy.example.com/device","expires_in":600}
+        """#.utf8))
+        XCTAssertEqual(code.interval, 5)
+
+        StubURLProtocol.stub("auth/device/token", status: 400, body: #"{"error":"slow_down"}"#)
+        let slower = try await makeFlow().poll(deviceCode: "d", currentInterval: 7)
+        XCTAssertEqual(slower, .slowDown(interval: 12))
+        let standalone = try await makeFlow().poll(deviceCode: "d")
+        XCTAssertEqual(standalone, .slowDown(interval: 5))
+    }
+
+    /// OAuth error bodies put the code word in `error` and the sentence in
+    /// `error_description`; the sentence is what a person reads.
+    func testErrorDescriptionIsTheMessageShown() {
+        let data = Data(#"{"error":"temporarily_unavailable","error_description":"Sign-in is paused for maintenance."}"#.utf8)
+        XCTAssertEqual(GitboyTransport.message(from: data), "Sign-in is paused for maintenance.")
+        XCTAssertEqual(GitboyTransport.message(from: Data(#"{"error":"Token requires read:issue"}"#.utf8)),
+                       "Token requires read:issue")
     }
 
     func testPollAuthorizedSplitsScopesAndParsesExpiry() async throws {

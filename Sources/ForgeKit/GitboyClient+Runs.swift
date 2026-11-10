@@ -432,6 +432,10 @@ extension GitboyClient {
             // Two of gitboy's closing words are not job statuses: the token
             // lost its access while the log was being read, or the job is gone.
             switch status.lowercased() {
+            case "timeout":
+                // The server closes a long stream on a time limit. The job is
+                // not over: pick the log up again from the last byte read.
+                throw GitboyStreamTimeout()
             case "access_revoked":
                 throw ForgeError.unauthorized("Access to this job's log was revoked.")
             case "deleted":
@@ -462,7 +466,10 @@ extension GitboyClient {
         defer { logStreams[id] = nil }
         do {
             var next = 0
-            for attempt in 0...1 {
+            // A dropped connection is retried once. A stream the server closed
+            // on its time limit is not a failure and is always picked up again.
+            var failures = 0
+            while true {
                 guard !Task.isCancelled else {
                     continuation.finish()
                     return
@@ -478,6 +485,10 @@ extension GitboyClient {
                                          into: continuation, lastNext: &next) {
                         return
                     }
+                    // Ended without `done`.
+                    if failures >= 1 { throw ForgeError.invalidResponse }
+                } catch is GitboyStreamTimeout {
+                    continue
                 } catch {
                     if Task.isCancelled {
                         continuation.finish()
@@ -485,10 +496,10 @@ extension GitboyClient {
                     }
                     // The server's own refusal is its answer, not a dropped
                     // socket: only a transport failure is worth one retry.
-                    if error is ForgeError || attempt == 1 { throw error }
+                    if error is ForgeError || failures >= 1 { throw error }
                 }
+                failures += 1
             }
-            throw ForgeError.invalidResponse
         } catch {
             if let forge = error as? ForgeError {
                 continuation.finish(throwing: forge)
@@ -498,3 +509,6 @@ extension GitboyClient {
         }
     }
 }
+
+/// gitboy closed a log stream on its time limit; the job is still running.
+struct GitboyStreamTimeout: Error {}
