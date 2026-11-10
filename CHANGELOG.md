@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.2
+
+### Changed
+
+- **Sign-in failures about the address have their own type,
+  `GitboySignInError`**, so an app can tell them apart without matching text:
+  `.notGitboyServer`, `.approvalPageElsewhere(URL)` (its message names the
+  host it was sent to) and `.responseTooLarge`. In 0.3.1 the first two were
+  `ForgeError.validation` strings and the third was `.invalidResponse`.
+- **RFC 8628 intervals.** A device-code answer without `interval` means 5
+  seconds, and `slow_down` without an interval adds 5 seconds to the one in
+  use instead of resetting it to 5.
+- **OAuth error sentences.** An error body's `error_description` is the
+  message shown when there is one; `error` is only its code word.
+- **A log stream the server closes on its time limit is picked up again.**
+  A `done` with status `timeout` reconnects from the last byte read instead of
+  ending the log as if the job had finished.
+- `GitboyDeviceFlow.responseLimit` is public.
+
+### Upgrading from 0.3.1
+
+- Code that matched the two sign-in sentences, or caught them as
+  `ForgeError`, catches `GitboySignInError` instead. Code that shows
+  `error.localizedDescription` needs no change.
+
 ## 0.3.1
 
 ### Changed

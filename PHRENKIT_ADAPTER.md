@@ -350,3 +350,10 @@ files. 0.3.1 hardens gitboy sign-in (the approval page must be on the
 instance, sign-in answers are bounded, a wrong address gets a clear error)
 and changes no API.
 
+---
+
+# Moving from 0.3.1 to 0.3.2
+
+Only the pin changes for phren-apps: `GitboySignInView` shows
+`error.localizedDescription` and does not catch the sign-in errors by type.
+

@@ -3,6 +3,32 @@ import Foundation
 import FoundationNetworking
 #endif
 
+/// Why gitboy sign-in stopped before the person could approve it. These are
+/// about the address, not the account, so they are a type of their own: an
+/// app can tell them apart without matching text.
+public enum GitboySignInError: Error, Equatable, Sendable, LocalizedError {
+    /// The address answered, but not the way gitboy does.
+    case notGitboyServer
+    /// The server sent a sign-in page that is not on the instance itself.
+    /// Carries the page it sent.
+    case approvalPageElsewhere(URL)
+    /// A sign-in answer was larger than any real one
+    /// (`GitboyDeviceFlow.responseLimit`).
+    case responseTooLarge
+
+    public var errorDescription: String? {
+        switch self {
+        case .notGitboyServer:
+            return "That address doesn't answer like a gitboy server. Check the host name."
+        case .approvalPageElsewhere(let page):
+            let place = page.host.map { " (\($0))" } ?? ""
+            return "This server sent a sign-in page on another address\(place), so sign-in was stopped."
+        case .responseTooLarge:
+            return "The server's sign-in answer was too large to be a gitboy answer, so sign-in was stopped."
+        }
+    }
+}
+
 /// Step 1's response: what to show the user and how fast to poll.
 public struct GitboyDeviceCode: Codable, Equatable, Sendable {
     public let deviceCode: String
@@ -19,6 +45,27 @@ public struct GitboyDeviceCode: Codable, Equatable, Sendable {
         case verificationURIComplete = "verification_uri_complete"
         case expiresIn = "expires_in"
         case interval
+    }
+
+    public init(deviceCode: String, userCode: String, verificationURI: URL,
+                verificationURIComplete: URL?, expiresIn: Int, interval: Int) {
+        self.deviceCode = deviceCode
+        self.userCode = userCode
+        self.verificationURI = verificationURI
+        self.verificationURIComplete = verificationURIComplete
+        self.expiresIn = expiresIn
+        self.interval = interval
+    }
+
+    /// RFC 8628 makes `interval` optional, with 5 seconds when it is left out.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        deviceCode = try c.decode(String.self, forKey: .deviceCode)
+        userCode = try c.decode(String.self, forKey: .userCode)
+        verificationURI = try c.decode(URL.self, forKey: .verificationURI)
+        verificationURIComplete = try c.decodeIfPresent(URL.self, forKey: .verificationURIComplete)
+        expiresIn = try c.decode(Int.self, forKey: .expiresIn)
+        interval = try c.decodeIfPresent(Int.self, forKey: .interval) ?? 5
     }
 }
 
@@ -39,14 +86,7 @@ public struct GitboyDeviceFlow: Sendable {
     private static let grantType = "urn:ietf:params:oauth:grant-type:device_code"
     private static let defaultSlowDownInterval = 5
     /// A sign-in answer is a few hundred bytes; anything past this is not one.
-    static let responseLimit = 64 * 1024
-
-    /// The address answered, but not the way gitboy does.
-    static let notGitboy = ForgeError.validation(
-        "That address doesn't answer like a gitboy server. Check the host name.")
-    /// The page a person is sent to must be on the instance they typed.
-    static let foreignApprovalPage = ForgeError.validation(
-        "This server sent a sign-in page on another address, so sign-in was stopped.")
+    public static let responseLimit = 64 * 1024
 
     private let transport: GitboyTransport
 
@@ -85,17 +125,17 @@ public struct GitboyDeviceFlow: Sendable {
         case 200..<300:
             break
         case 404, 405:
-            throw Self.notGitboy
+            throw GitboySignInError.notGitboyServer
         default:
             throw GitboyTransport.error(status: http.statusCode, headers: http, data: data)
         }
         guard let code = try? JSONDecoder().decode(GitboyDeviceCode.self, from: data) else {
-            throw Self.notGitboy
+            throw GitboySignInError.notGitboyServer
         }
         let host = transport.host
-        guard GitboyRedirectPolicy.allows(code.verificationURI, host: host),
-              code.verificationURIComplete.map({ GitboyRedirectPolicy.allows($0, host: host) }) ?? true else {
-            throw Self.foreignApprovalPage
+        for page in [code.verificationURI] + [code.verificationURIComplete].compactMap({ $0 })
+        where !GitboyRedirectPolicy.allows(page, host: host) {
+            throw GitboySignInError.approvalPageElsewhere(page)
         }
         return code
     }
@@ -103,6 +143,12 @@ public struct GitboyDeviceFlow: Sendable {
     /// Step 2: one poll. The 400 body is the protocol's state machine, not a
     /// transport failure, so it is decoded rather than thrown.
     public func poll(deviceCode: String) async throws -> PollState {
+        try await poll(deviceCode: deviceCode, currentInterval: nil)
+    }
+
+    /// `slow_down` without an interval adds 5 seconds to the one in use, as
+    /// RFC 8628 says; with no interval in use either, it is 5 seconds.
+    func poll(deviceCode: String, currentInterval: Int?) async throws -> PollState {
         let body = try JSONSerialization.data(withJSONObject: [
             "device_code": deviceCode,
             "grant_type": Self.grantType,
@@ -123,7 +169,9 @@ public struct GitboyDeviceFlow: Sendable {
             }
             switch failure.error {
             case "authorization_pending": return .pending
-            case "slow_down": return .slowDown(interval: failure.interval ?? Self.defaultSlowDownInterval)
+            case "slow_down":
+                return .slowDown(interval: failure.interval
+                                 ?? (currentInterval.map { $0 + 5 } ?? Self.defaultSlowDownInterval))
             case "access_denied": return .denied
             case "expired_token", "invalid_grant": return .expired
             default: throw ForgeError.invalidResponse
@@ -141,7 +189,7 @@ public struct GitboyDeviceFlow: Sendable {
         let deadline = Date().addingTimeInterval(TimeInterval(max(0, code.expiresIn)))
         while Date() < deadline {
             try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
-            switch try await poll(deviceCode: code.deviceCode) {
+            switch try await poll(deviceCode: code.deviceCode, currentInterval: Int(interval)) {
             case .authorized(let credential): return .authorized(credential)
             case .pending: continue
             case .slowDown(let newInterval): interval = TimeInterval(max(1, newInterval))

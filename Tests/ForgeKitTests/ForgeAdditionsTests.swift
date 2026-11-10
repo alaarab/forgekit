@@ -506,6 +506,46 @@ extension ForgeAdditionsTests {
         }
     }
 
+    /// gitboy closes a long log stream on a time limit with `timeout`. The
+    /// job is not over: the stream reconnects from the last byte read.
+    func testLiveLogPicksUpAgainAfterTheServersTimeLimit() async throws {
+        ForgeHeaderRecorder.reset(status: 200, body: """
+        event: log
+        id: 6
+        data: {"offset":0,"text":"Hello "}
+
+        event: done
+        data: {"status":"timeout","offset":6}
+        """)
+        ForgeHeaderRecorder.queue(status: 200, body: """
+        event: log
+        id: 12
+        data: {"offset":6,"text":"world!"}
+
+        event: done
+        data: {"status":"success"}
+        """)
+        let client = GitboyClient(host: .testGitboy, token: "gb-secret",
+                                  session: ForgeHeaderRecorder.session())
+        let run = ForgeRun(repo: repo(.testGitboy), runID: "7", number: 7, title: "Pipeline #7",
+                           workflow: nil, branch: "main", sha: "sha-7", event: "push", actor: "octo",
+                           status: .running, createdAt: nil, updatedAt: nil,
+                           webURL: URL(string: "https://gitboy.example.com/octo/app/pipelines/7")!)
+        let job = ForgeJob(run: run, jobID: "j1", name: "build", stage: "build", status: .running,
+                           attempt: 1, allowFailure: false, failureReason: nil, startedAt: nil,
+                           finishedAt: nil, runnerName: nil,
+                           webURL: URL(string: "https://gitboy.example.com/octo/app/pipelines/7?job=j1")!)
+
+        var events: [ForgeLogEvent] = []
+        for try await event in client.liveLog(of: job) { events.append(event) }
+
+        XCTAssertEqual(events, [.text("Hello "), .text("world!"), .finished(.success)])
+        XCTAssertEqual(ForgeHeaderRecorder.requests.map(\.url), [
+            "https://gitboy.example.com/api/v1/repos/octo/app/jobs/j1/log/stream",
+            "https://gitboy.example.com/api/v1/repos/octo/app/jobs/j1/log/stream?offset=6",
+        ])
+    }
+
     /// A job removed while its log is being read closes the stream with
     /// `deleted`, which is not a status a job can finish in.
     func testLiveLogOfADeletedJobEndsAsNotFound() async {

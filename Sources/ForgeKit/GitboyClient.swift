@@ -117,7 +117,7 @@ struct GitboyTransport: Sendable {
             var read = Data()
             for try await byte in bytes {
                 read.append(byte)
-                if read.count > limit { throw ForgeError.invalidResponse }
+                if read.count > limit { throw GitboySignInError.responseTooLarge }
             }
             data = read
             response = answer
@@ -164,11 +164,16 @@ struct GitboyTransport: Sendable {
 }
 
 extension GitboyTransport {
-    /// The server's own sentence from an error body: `error`, or `message` on
-    /// the routes that answer in that shape. Empty when there is none.
+    /// The server's own sentence from an error body: OAuth's
+    /// `error_description` when there is one (its `error` is a code word),
+    /// else `error`, or `message` on the routes that answer in that shape.
+    /// Empty when there is none.
     static func message(from data: Data) -> String {
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        let raw = (json?["error"] as? String) ?? (json?["message"] as? String) ?? ""
+        let description = (json?["error_description"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = description.flatMap { $0.isEmpty ? nil : $0 }
+            ?? (json?["error"] as? String) ?? (json?["message"] as? String) ?? ""
         return raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
