@@ -341,3 +341,12 @@ Nothing is required beyond the pin. An app can go from 0.1.0 straight to
     merge. gitboy queues a merge or a squash, not a rebase.
   - `forge.updateBranch(of:expectedHeadSHA:)` and `forge.markReady(_:)`.
 
+---
+
+# Moving from 0.3.0 to 0.3.1
+
+Only the pin changes: `exact: "0.3.1"` in the three places, and the resolved
+files. 0.3.1 hardens gitboy sign-in (the approval page must be on the
+instance, sign-in answers are bounded, a wrong address gets a clear error)
+and changes no API.
+
