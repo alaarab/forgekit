@@ -79,9 +79,14 @@ public struct GitHubPullDTO: Decodable, Sendable {
     let changedFiles: Int?
     let comments: Int?
     let reviewComments: Int?
+    /// The GraphQL id, which the auto-merge and ready-for-review mutations take.
+    let nodeID: String?
+    let autoMerge: GitHubAutoMergeDTO?
 
     enum CodingKeys: String, CodingKey {
         case number, title, body, user, state, draft, head, base, commits, additions, deletions, comments
+        case nodeID = "node_id"
+        case autoMerge = "auto_merge"
         case updatedAt = "updated_at"
         case htmlURL = "html_url"
         case mergedAt = "merged_at"
@@ -94,6 +99,29 @@ public struct GitHubPullDTO: Decodable, Sendable {
 
 struct GitHubPullActor: Decodable, Sendable {
     let login: String
+}
+
+/// `auto_merge` on a pull request: present while a merge is queued.
+struct GitHubAutoMergeDTO: Decodable, Sendable {
+    let mergeMethod: String?
+    let enabledBy: GitHubPullActor?
+
+    enum CodingKeys: String, CodingKey {
+        case mergeMethod = "merge_method"
+        case enabledBy = "enabled_by"
+    }
+}
+
+/// One workflow in `GET repos/…/actions/workflows`.
+public struct GitHubWorkflowDTO: Decodable, Sendable {
+    let id: Int
+    let name: String?
+    let path: String?
+    let state: String?
+}
+
+struct GitHubWorkflowsPage: Decodable, Sendable {
+    let workflows: [GitHubWorkflowDTO]
 }
 
 struct GitHubPullBranchRef: Decodable, Sendable {

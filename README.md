@@ -9,9 +9,10 @@ two hosts, so one set of screens works against either:
 - **gitboy**, through `GitboyClient`, including device-flow sign-in.
 
 What it covers on both hosts: the signed-in user, repositories, issues, pull
-requests (detail, reviews, checks, merge, conversation, diff), CI runs, jobs
-and logs, and runners. gitboy adds live logs over SSE, pausing runners, and
-agent sessions (sending an issue to an agent on one of your computers).
+requests (detail, reviews, checks, merge, merge when green, update branch,
+conversation, diff), CI runs, jobs and logs, starting a run, and runners.
+gitboy adds live logs over SSE, pausing runners, and agent sessions (sending
+an issue to an agent on one of your computers).
 `forge.capabilities` says what a host can do, so a screen shows or hides a
 control instead of asking which host it is on.
 
@@ -61,7 +62,7 @@ redirect and throttling rules exist once.
 Add the package with an exact version, not a range:
 
 ```swift
-.package(url: "https://github.com/alaarab/forgekit.git", exact: "0.2.0")
+.package(url: "https://github.com/alaarab/forgekit.git", exact: "0.3.0")
 ```
 
 and the target dependency:

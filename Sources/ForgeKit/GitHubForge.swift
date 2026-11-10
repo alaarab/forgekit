@@ -4,7 +4,8 @@ import Foundation
 /// nothing about GitHub sign-in or memory-store sync changes.
 public struct GitHubForge: Forge {
     public let host: ForgeHost
-    public var capabilities: ForgeCapabilities { ForgeCapabilities.github }
+    /// `.github`, less what the transport this forge was given cannot do.
+    public let capabilities: ForgeCapabilities
 
     private static let pageSize = 100
     /// How many pages one search call reads before it answers with what it has.
@@ -14,10 +15,31 @@ public struct GitHubForge: Forge {
     /// call goes through `GitHubMappedTransport`, so what a screen catches is
     /// a `ForgeError` on either host.
     let client: any GitHubTransport
+    /// The transport as it was given, to ask what else it can do.
+    let base: any GitHubTransport
 
     public init(client: any GitHubTransport) {
         self.client = GitHubMappedTransport(base: client)
+        self.base = client
         self.host = .github
+        var capabilities = ForgeCapabilities.github
+        if !(client is any GitHubWorkflowTransport) {
+            capabilities.remove(.startRuns)
+        }
+        if !(client is any GitHubPullAutomationTransport) {
+            capabilities.subtract([.autoMerge, .updateBranch, .markReady])
+        }
+        self.capabilities = capabilities
+    }
+
+    /// Runs requests made on `base` directly and rethrows what they fail with
+    /// as `ForgeError`, as `client` does for the rest.
+    func github<T>(_ work: () async throws -> T) async throws -> T {
+        do {
+            return try await work()
+        } catch {
+            throw GitHubMappedTransport.forgeError(error)
+        }
     }
 
     public func currentUser() async throws -> ForgeUser {

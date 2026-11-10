@@ -125,7 +125,12 @@ extension GitHubForge {
             additions: dto.additions,
             deletions: dto.deletions,
             changedFiles: dto.changedFiles,
-            comments: commentCount)
+            comments: commentCount,
+            autoMerge: dto.autoMerge.map { queued in
+                ForgeAutoMerge(method: ForgeMergeMethod(rawValue: (queued.mergeMethod ?? "").lowercased()),
+                               requestedBy: queued.enabledBy?.login,
+                               reason: nil)
+            })
     }
 
     public func merge(_ pull: ForgePullRequest, method: ForgeMergeMethod,
