@@ -238,3 +238,65 @@ PhrenKit's forge tests move with ForgeKit and are deleted from PhrenKit:
 `GitHubClientTests.swift`; ForgeKit carries its own copy in
 `Tests/ForgeKitTests/TestSupport.swift`, so PhrenKit's
 `GitHubClientTests.swift` keeps its version for the client tests that stayed.
+
+---
+
+# Moving phren-apps from 0.1.0 to 0.2.0
+
+Everything above describes the 0.1.0 adoption, which is done. These are the
+changes the 0.2.0 version bump needs, in its own pull request.
+
+## Required
+
+1. **Bump the pin** to `exact: "0.2.0"` in `PhrenKit/Package.swift`,
+   `PhrenLive/Package.swift` and `project.yml`.
+
+2. **Add `pullDiff` to `GitHubClient`.** `GitHubTransport` has one new
+   requirement. In `GitHubClient+Pulls.swift`:
+
+   ```swift
+   public func pullDiff(owner: String, repo: String, number: Int) async throws -> String {
+       let path = try Self.repoPath(owner: owner, repo: repo) + "/pulls/\(number)"
+       let (data, http) = try await request(path, accept: "application/vnd.github.diff")
+       try Self.ensureOK(http, data: data, path: path)
+       return String(decoding: data, as: UTF8.self)
+   }
+   ```
+
+3. **Error wording in tests.** Any test that asserts "You're not signed in to
+   this gitboy host." or "Your gitboy token needs the … scope." needs the new
+   sentences (`Forge.swift`, `ForgeError.errorDescription`).
+
+Nothing else is required: `FixtureForge` keeps compiling, because every new
+`Forge` method has a default implementation.
+
+## What the app can now delete or simplify
+
+- **GitHub errors.** `GitHubForge` throws `ForgeError`, so `ForgeRetryView`'s
+  missing-scope and sign-in handling and `ForgeRunnersView.accessSentence` now
+  fire on GitHub screens too. The rewrite of 403/404 into `ForgeError` inside
+  `GitHubClient+Runners.swift` can stay or go; both paths end in `ForgeError`.
+- **Host checks become capability checks.**
+  - `ForgeRunDetailView`: job cancel and play are `.cancelJob` and `.playJob`.
+  - `ForgeHubView`: the account-wide runners link is `.accountRunners`.
+  - `ForgeRepoView`: the pull requests row is `.pullRequests`.
+- **Pasted tokens.** `GitboySignInView` saves a pasted token with
+  `scopes: []`. Call `GitboyClient.tokenInfo()` after `currentUser()` and save
+  its scopes and expiry instead.
+- **The second copy of the GitHub client.** `GitHubHTTPTransport` now has
+  what `GitHubClient.request` added on top of it: `preflight` (pass
+  `{ try DemoGate.check() }`) and `etagKey`. `request`, `get`, `ensureOK`,
+  `encodePath` and `repoPath` are public. `GitHubClient` can become an
+  extension of `GitHubHTTPTransport` that adds only what ForgeKit does not
+  have (`headSha`, `tree`, `blob`, `putFile`, `deleteFile`, `probeStore`, the
+  GitHub App installation calls), and the duplicated endpoint files
+  (`GitHubClient+Issues/Pulls/Actions/Runners.swift`) can be deleted.
+
+## New screens the layer can now back
+
+- The pull request conversation: `forge.comments(on:)`, `forge.comment(on:body:)`.
+- The pull request's changes: `forge.diff(of:)` returns unified diff text.
+- Agent sessions on gitboy: `forge.computers()`, `forge.agentSessions(on:)`,
+  `forge.startAgentSession(on:computer:harness:)`, `forge.cancel(_:)`,
+  `forge.myAgentSessions()`. Gate them on `.agentSessions`.
+
