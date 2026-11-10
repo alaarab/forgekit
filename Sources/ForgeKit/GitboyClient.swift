@@ -79,11 +79,16 @@ struct GitboyTransport: Sendable {
 
     /// `validate: false` lets device-flow polling read an expected 400 body
     /// (authorization_pending, slow_down, …) instead of throwing on it.
+    ///
+    /// `limit` bounds the answer in bytes. Sign-in talks to an address a
+    /// person typed, before anything says it is a gitboy server, so its
+    /// answers are read up to a small limit and no further.
     func send(_ path: String, method: String = "GET",
               query: [URLQueryItem] = [],
               body: Data? = nil,
               bearer: String?,
-              validate: Bool = true) async throws -> (Data, HTTPURLResponse) {
+              validate: Bool = true,
+              limit: Int? = nil) async throws -> (Data, HTTPURLResponse) {
         // Not appendingPathComponent: query strings would be percent-encoded.
         guard let base = URL(string: path, relativeTo: host.apiBase)?.absoluteURL,
               var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
@@ -105,7 +110,20 @@ struct GitboyTransport: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
 
-        let (data, response) = try await session.data(for: request, delegate: redirects)
+        let data: Data
+        let response: URLResponse
+        if let limit {
+            let (bytes, answer) = try await session.forgeBytes(for: request, delegate: redirects)
+            var read = Data()
+            for try await byte in bytes {
+                read.append(byte)
+                if read.count > limit { throw ForgeError.invalidResponse }
+            }
+            data = read
+            response = answer
+        } else {
+            (data, response) = try await session.data(for: request, delegate: redirects)
+        }
         guard let http = response as? HTTPURLResponse else { throw ForgeError.invalidResponse }
         if validate, !(200..<300).contains(http.statusCode) {
             throw Self.error(status: http.statusCode, headers: http, data: data)

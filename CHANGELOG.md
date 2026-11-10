@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **gitboy sign-in checks where it is sending you.** `requestCode()` refuses
+  an approval page that is not on the instance itself (https, same host and
+  port, no credentials in the link), for both the page and its short link.
+- **Sign-in answers are read up to 64 KiB.** The code and poll requests go to
+  an address a person typed, before anything says it is a gitboy server, so a
+  larger answer is refused rather than read into memory.
+- **A wrong address is reported as one.** A 404, a 405, or an answer that is
+  not gitboy's on `requestCode()` now says the address doesn't answer like a
+  gitboy server, instead of "not found" or an unreadable response. Throttling
+  (429) and server errors (5xx) keep their own cases.
+
 ## 0.3.0
 
 ### Added

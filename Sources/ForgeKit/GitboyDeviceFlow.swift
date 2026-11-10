@@ -38,6 +38,15 @@ public struct GitboyDeviceFlow: Sendable {
 
     private static let grantType = "urn:ietf:params:oauth:grant-type:device_code"
     private static let defaultSlowDownInterval = 5
+    /// A sign-in answer is a few hundred bytes; anything past this is not one.
+    static let responseLimit = 64 * 1024
+
+    /// The address answered, but not the way gitboy does.
+    static let notGitboy = ForgeError.validation(
+        "That address doesn't answer like a gitboy server. Check the host name.")
+    /// The page a person is sent to must be on the instance they typed.
+    static let foreignApprovalPage = ForgeError.validation(
+        "This server sent a sign-in page on another address, so sign-in was stopped.")
 
     private let transport: GitboyTransport
 
@@ -58,15 +67,35 @@ public struct GitboyDeviceFlow: Sendable {
     }
 
     /// Step 1: ask for the code pair to display.
+    ///
+    /// This is the first request to an address a person typed, so it is also
+    /// where a wrong address shows: an answer that is not gitboy's is reported
+    /// as that, and the approval page must be on the instance itself (https,
+    /// same host and port, no credentials in the link). A page anywhere else
+    /// would have the person approve a code on a site they did not choose.
     public func requestCode() async throws -> GitboyDeviceCode {
         let body = try JSONSerialization.data(withJSONObject: [
             "client_name": clientName,
             "scopes": scopes,
         ])
-        let (data, _) = try await transport.send("auth/device/code", method: "POST",
-                                                 body: body, bearer: nil)
+        let (data, http) = try await transport.send("auth/device/code", method: "POST",
+                                                    body: body, bearer: nil, validate: false,
+                                                    limit: Self.responseLimit)
+        switch http.statusCode {
+        case 200..<300:
+            break
+        case 404, 405:
+            throw Self.notGitboy
+        default:
+            throw GitboyTransport.error(status: http.statusCode, headers: http, data: data)
+        }
         guard let code = try? JSONDecoder().decode(GitboyDeviceCode.self, from: data) else {
-            throw ForgeError.invalidResponse
+            throw Self.notGitboy
+        }
+        let host = transport.host
+        guard GitboyRedirectPolicy.allows(code.verificationURI, host: host),
+              code.verificationURIComplete.map({ GitboyRedirectPolicy.allows($0, host: host) }) ?? true else {
+            throw Self.foreignApprovalPage
         }
         return code
     }
@@ -79,7 +108,8 @@ public struct GitboyDeviceFlow: Sendable {
             "grant_type": Self.grantType,
         ])
         let (data, http) = try await transport.send("auth/device/token", method: "POST",
-                                                    body: body, bearer: nil, validate: false)
+                                                    body: body, bearer: nil, validate: false,
+                                                    limit: Self.responseLimit)
         switch http.statusCode {
         case 200..<300:
             guard let response = try? JSONDecoder().decode(GitboyTokenResponse.self, from: data),

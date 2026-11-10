@@ -428,6 +428,101 @@ final class GitboyDeviceFlowTests: XCTestCase {
         XCTAssertFalse(body.contains(GitboyDeviceFlow.clientName), body)
     }
 
+    private func deviceCodeJSON(page: String, complete: String? = nil) -> String {
+        let completeField = complete.map { #","verification_uri_complete":"\#($0)""# } ?? ""
+        return #"{"device_code":"device-1","user_code":"ABCD-1234","verification_uri":"\#(page)""#
+            + completeField + #","expires_in":600,"interval":5}"#
+    }
+
+    private func requestCodeError() async -> ForgeError? {
+        do {
+            _ = try await makeFlow().requestCode()
+            XCTFail("Expected requestCode to throw")
+            return nil
+        } catch let error as ForgeError {
+            return error
+        } catch {
+            XCTFail("Expected a ForgeError, got \(error)")
+            return nil
+        }
+    }
+
+    /// The page a person approves the code on must be the instance they
+    /// typed. Anything else is a site they did not choose.
+    func testApprovalPageOnAnotherOriginStopsSignIn() async {
+        let foreign = [
+            "https://evil.example.com/device",
+            "http://gitboy.example.com/device",
+            "https://gitboy.example.com:8443/device",
+            "https://user:pass@gitboy.example.com/device",
+            "https://gitboy.example.com.evil.example.com/device",
+        ]
+        for page in foreign {
+            StubURLProtocol.reset()
+            StubURLProtocol.stub("auth/device/code", status: 200, body: deviceCodeJSON(page: page))
+            let error = await requestCodeError()
+            XCTAssertEqual(error, GitboyDeviceFlow.foreignApprovalPage, page)
+        }
+
+        // The short link is checked too, not only the page.
+        StubURLProtocol.reset()
+        StubURLProtocol.stub("auth/device/code", status: 200,
+                             body: deviceCodeJSON(page: "https://gitboy.example.com/device",
+                                                  complete: "https://evil.example.com/device?code=ABCD-1234"))
+        let error = await requestCodeError()
+        XCTAssertEqual(error, GitboyDeviceFlow.foreignApprovalPage)
+    }
+
+    /// A host name that reaches some other server is told apart from a
+    /// gitboy that refused: the fix is the address, not the account.
+    func testAnAddressThatIsNotGitboySaysSo() async {
+        let answers: [(status: Int, body: String)] = [
+            (404, "<html>Not Found</html>"),
+            (405, #"{"message":"Method Not Allowed"}"#),
+            (200, "<html>Welcome to nginx</html>"),
+            (200, #"{"hello":"world"}"#),
+        ]
+        for answer in answers {
+            StubURLProtocol.reset()
+            StubURLProtocol.stub("auth/device/code", status: answer.status, body: answer.body)
+            let error = await requestCodeError()
+            XCTAssertEqual(error, GitboyDeviceFlow.notGitboy, "HTTP \(answer.status) \(answer.body)")
+        }
+    }
+
+    /// A gitboy that is busy or broken still says so in its own terms.
+    func testRequestCodeKeepsThrottlingAndServerErrorsDistinct() async {
+        StubURLProtocol.stub("auth/device/code", status: 429, headers: ["Retry-After": "60"],
+                             body: #"{"error":"Too many requests"}"#)
+        guard case .rateLimited(let until) = await requestCodeError() else {
+            return XCTFail("Expected .rateLimited")
+        }
+        XCTAssertNotNil(until)
+
+        StubURLProtocol.reset()
+        StubURLProtocol.stub("auth/device/code", status: 503, body: #"{"error":"Database unavailable"}"#)
+        let error = await requestCodeError()
+        XCTAssertEqual(error, .server(status: 503, message: "Database unavailable"))
+    }
+
+    /// Sign-in answers are a few hundred bytes. One that keeps coming is cut
+    /// off at the limit instead of being read into memory.
+    func testASignInAnswerPastTheSizeLimitIsRefused() async {
+        let padding = String(repeating: "x", count: GitboyDeviceFlow.responseLimit + 1)
+        StubURLProtocol.stub("auth/device/code", status: 200, body: #"{"padding":"\#(padding)"}"#)
+        let onCode = await requestCodeError()
+        XCTAssertEqual(onCode, .invalidResponse)
+
+        StubURLProtocol.reset()
+        StubURLProtocol.stub("auth/device/token", status: 400, body: #"{"error":"\#(padding)"}"#)
+        do {
+            _ = try await makeFlow().poll(deviceCode: "device-1")
+            XCTFail("Expected the oversized poll answer to be refused")
+        } catch {
+            XCTAssertEqual(error as? ForgeError, .invalidResponse)
+        }
+    }
+
     func testPollAuthorizedSplitsScopesAndParsesExpiry() async throws {
         StubURLProtocol.stub("auth/device/token", status: 200, body: """
         {"access_token":"gb-token","token_type":"bearer",
