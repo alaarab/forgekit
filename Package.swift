@@ -4,8 +4,8 @@ import PackageDescription
 let package = Package(
     name: "ForgeKit",
     platforms: [
-        .iOS(.v17),
-        .macOS(.v14),
+        .iOS(.v16),
+        .macOS(.v13),
     ],
     products: [
         .library(name: "ForgeKit", targets: ["ForgeKit"]),

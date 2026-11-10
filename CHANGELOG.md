@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.3
+
+### Changed
+
+- **Minimum platforms are iOS 16 and macOS 13** (were iOS 17 and macOS 14).
+  Nothing in ForgeKit needed the newer ones, so an app no longer has to drop
+  iOS 16 to use it. CI now builds the package for an iOS 16 device.
+
+### Upgrading from 0.3.2
+
+- Only the pin changes.
+
 ## 0.3.2
 
 ### Changed

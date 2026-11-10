@@ -22,6 +22,10 @@ jobs:
         run: swift --version
       - name: Test
         run: swift test
+      # The package's lowest iOS target, compiled for a device, so an API
+      # newer than iOS 16 fails here rather than in an app's build.
+      - name: Build for iOS 16
+        run: xcodebuild build -scheme ForgeKit -destination 'generic/platform=iOS' IPHONEOS_DEPLOYMENT_TARGET=16.0 -quiet
 
   # Linux has no Keychain and no streamed URLSession bytes, so this job covers
   # the models, the mappings and the request shapes; macOS covers the rest.
