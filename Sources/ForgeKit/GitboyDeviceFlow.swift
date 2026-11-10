@@ -146,9 +146,10 @@ public struct GitboyDeviceFlow: Sendable {
         try await poll(deviceCode: deviceCode, currentInterval: nil)
     }
 
-    /// `slow_down` without an interval adds 5 seconds to the one in use, as
+    /// One poll from an app that runs its own loop. `currentInterval` is the
+    /// interval in use, so a `slow_down` without one adds 5 seconds to it, as
     /// RFC 8628 says; with no interval in use either, it is 5 seconds.
-    func poll(deviceCode: String, currentInterval: Int?) async throws -> PollState {
+    public func poll(deviceCode: String, currentInterval: Int?) async throws -> PollState {
         let body = try JSONSerialization.data(withJSONObject: [
             "device_code": deviceCode,
             "grant_type": Self.grantType,
