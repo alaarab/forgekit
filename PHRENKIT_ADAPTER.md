@@ -264,25 +264,37 @@ changes the 0.2.0 version bump needs, in its own pull request.
    ```
 
 3. **Error wording in tests.** Any test that asserts "You're not signed in to
-   this gitboy host." or "Your gitboy token needs the … scope." needs the new
-   sentences (`Forge.swift`, `ForgeError.errorDescription`).
+   this gitboy host.", "Your gitboy token needs the … scope." or "The forge
+   sent a response Phren couldn't read." needs the new sentences (`Forge.swift`,
+   `ForgeError.errorDescription`).
 
-Nothing else is required: `FixtureForge` keeps compiling, because every new
-`Forge` method has a default implementation.
+4. **Narrow `FixtureForge.capabilities`.** It answers with the `.github` or
+   `.gitboy` preset, and the presets now include `.pullComments`, `.pullDiffs`
+   and `.agentSessions`. `FixtureForge` keeps compiling, because every new
+   `Forge` method has a default implementation, but those defaults refuse. So
+   until the fixture implements them, subtract the three flags; otherwise the
+   first screen that gates on one shows a control the demo cannot back.
 
 ## What the app can now delete or simplify
 
-- **GitHub errors.** `GitHubForge` throws `ForgeError`, so `ForgeRetryView`'s
-  missing-scope and sign-in handling and `ForgeRunnersView.accessSentence` now
-  fire on GitHub screens too. The rewrite of 403/404 into `ForgeError` inside
-  `GitHubClient+Runners.swift` can stay or go; both paths end in `ForgeError`.
+- **GitHub errors.** `GitHubForge` throws `ForgeError`, so the screens'
+  `ForgeError` handling (`ForgeRetryView`, `ForgeRunnersView.accessSentence`)
+  now sees GitHub failures too. Two limits:
+  - GitHub does not name the scope it wants, so a GitHub 403 arrives as
+    `.unauthorized` with GitHub's message, never as `.missingScope`. The
+    "Required scope" link stays gitboy-only.
+  - Keep the 403/404 rewrite in `GitHubClient+Runners.swift`. It is what
+    gives the runners screen its "You need admin access…" sentence; without
+    it a 404 there arrives with the general repository-access explanation.
 - **Host checks become capability checks.**
   - `ForgeRunDetailView`: job cancel and play are `.cancelJob` and `.playJob`.
   - `ForgeHubView`: the account-wide runners link is `.accountRunners`.
   - `ForgeRepoView`: the pull requests row is `.pullRequests`.
 - **Pasted tokens.** `GitboySignInView` saves a pasted token with
   `scopes: []`. Call `GitboyClient.tokenInfo()` after `currentUser()` and save
-  its scopes and expiry instead.
+  its scopes and expiry instead. It needs `read:user` and answers nil when the
+  host cannot tell which token this is, so treat a thrown error or nil as
+  "scopes unknown" (`try?`), not as a failed sign-in.
 - **The second copy of the GitHub client.** `GitHubHTTPTransport` now has
   what `GitHubClient.request` added on top of it: `preflight` (pass
   `{ try DemoGate.check() }`) and `etagKey`. `request`, `get`, `ensureOK`,
@@ -299,4 +311,8 @@ Nothing else is required: `FixtureForge` keeps compiling, because every new
 - Agent sessions on gitboy: `forge.computers()`, `forge.agentSessions(on:)`,
   `forge.startAgentSession(on:computer:harness:)`, `forge.cancel(_:)`,
   `forge.myAgentSessions()`. Gate them on `.agentSessions`.
+
+  `computers()` needs a gitboy server whose runner list includes
+  `agent_harnesses`. As of 2026-11-09 gitboy's `GET /api/v1/user/runners`
+  leaves it out, so the list comes back empty until the server sends it.
 

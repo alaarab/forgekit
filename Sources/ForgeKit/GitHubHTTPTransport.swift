@@ -91,7 +91,8 @@ public actor GitHubHTTPTransport: GitHubTransport {
     /// as the outcome it is; `ensureOK` turns the rest into errors.
     ///
     /// `etagKey` makes the request conditional: the ETag last seen under that
-    /// key is sent as `If-None-Match`, and the new one is remembered.
+    /// key is sent as `If-None-Match`, and the new one is remembered. A 304
+    /// has no body, so the caller keeps what the last 200 carried.
     @discardableResult
     public func request(_ path: String, method: String = "GET",
                         accept: String = "application/vnd.github+json",

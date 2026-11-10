@@ -16,7 +16,9 @@
 - **Agent sessions** on gitboy: `computers()`, `agentSessions(on:)`,
   `myAgentSessions()`, `startAgentSession(on:computer:harness:)` and
   `cancel(_:)`, with `ForgeComputer`, `ForgeAgentSession` and
-  `ForgeAgentStatus`.
+  `ForgeAgentStatus`. `computers()` reads `agent_harnesses` from the runner
+  list, which gitboy's `GET /api/v1/user/runners` does not send yet
+  (2026-11-09); it answers an empty list until the server does.
 - **`GitboyClient.tokenInfo()`**: the scopes and expiry of the token in use,
   so a pasted token no longer has to be saved with no scopes.
 - **App-neutral sign-in and storage.** `GitboyDeviceFlow` takes `clientName`
@@ -36,8 +38,9 @@
   this app couldn't read."
 - A GitHub repository search reads past pages with no match (up to five per
   call) instead of answering an empty page that still offers more.
-- A gitboy live log that ends because access was revoked now ends with
-  `ForgeError.unauthorized`, not with a finished job in the "queued" state.
+- A gitboy live log that ends because access was revoked, or because the job
+  was deleted, now ends with `ForgeError.unauthorized` or `.notFound`, not
+  with a finished job in the "queued" state.
 - `Forge.liveLog(of:)` is documented as it behaves on a host without live
   logs: nothing while the job runs, then the whole log once.
 
@@ -47,7 +50,13 @@
   An app that conforms its own client adds that method; see
   `PHRENKIT_ADAPTER.md`.
 - **Code that catches `GitHubError` from a `GitHubForge` call** now receives
-  `ForgeError`. Calls made on the app's own GitHub client are unchanged.
+  `ForgeError`. Calls made on the app's own GitHub client are unchanged. A
+  404 on a repository path arrives as `.unauthorized` carrying GitHub's
+  explanation of token access, as the screens showed before; a GitHub 403
+  is `.unauthorized` too, never `.missingScope`.
+- **A `Forge` conformer that answers with the `.github` or `.gitboy` preset**
+  now claims `.pullComments`, `.pullDiffs` and `.agentSessions`. Implement
+  them or subtract the flags.
 - New `Forge` methods have default implementations that refuse, so an app's
   own `Forge` conformer (a fixture, a fake) keeps compiling. Check
   `capabilities` before offering the control.

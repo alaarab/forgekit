@@ -24,7 +24,14 @@ extension ForgeError {
             case 403:
                 self = .unauthorized(error.isRepoAccessDenied ? (error.errorDescription ?? message) : message)
             case 404:
-                self = .notFound
+                // On a repository path GitHub's 404 is usually a token that
+                // may not see the repository, and GitHubError says how to fix
+                // that. A screen keeps that sentence instead of "not found".
+                if error.isRepoAccessDenied, let explanation = error.errorDescription {
+                    self = .unauthorized(explanation)
+                } else {
+                    self = .notFound
+                }
             case 409:
                 self = .conflict(message)
             default:

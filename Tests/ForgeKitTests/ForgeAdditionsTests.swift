@@ -73,7 +73,6 @@ extension ForgeAdditionsTests {
                            + "then sign in again with a new token.")),
             (403, #"{"message":"Resource not accessible by personal access token"}"#,
              .unauthorized("Resource not accessible by personal access token")),
-            (404, #"{"message":"Not Found"}"#, .notFound),
             (409, #"{"message":"Git Repository is empty."}"#, .conflict("Git Repository is empty.")),
             (500, #"{"message":"boom"}"#, .server(status: 500, message: "boom")),
         ]
@@ -85,6 +84,24 @@ extension ForgeAdditionsTests {
             let error = await forgeError { _ = try await github.issue(in: self.repo(.github), number: 12) }
             XCTAssertEqual(error, expectation.expected, "HTTP \(expectation.status)")
         }
+    }
+
+    /// GitHub answers 404 for a repository the token may not see. The forge
+    /// keeps the sentence that says so; a 404 anywhere else is plain.
+    func testGitHubNotFoundOnARepositoryKeepsTheAccessExplanation() async {
+        StubURLProtocol.stub("repos/octo/app/issues/12", status: 404, body: #"{"message":"Not Found"}"#)
+        let github = makeGitHub()
+        let onRepo = await forgeError { _ = try await github.issue(in: self.repo(.github), number: 12) }
+        guard case .unauthorized(let message) = onRepo else {
+            return XCTFail("Expected the access explanation, got \(String(describing: onRepo))")
+        }
+        XCTAssertTrue(message.contains("octo/app"), message)
+        XCTAssertTrue(message.contains("token"), message)
+
+        StubURLProtocol.reset()
+        StubURLProtocol.stub("api.github.com/user", status: 404, body: #"{"message":"Not Found"}"#)
+        let elsewhere = await forgeError { _ = try await self.makeGitHub().currentUser() }
+        XCTAssertEqual(elsewhere, .notFound)
     }
 
     func testGitHubWithoutATokenIsNotSignedIn() async {
@@ -265,6 +282,26 @@ extension ForgeAdditionsTests {
         XCTAssertEqual(computers[0].runner.scope, .mine)
         XCTAssertEqual(StubURLProtocol.requests.last?.url,
                        "https://gitboy.example.com/api/v1/user/runners")
+    }
+
+    /// gitboy refuses a session on a paused computer, or on one that has not
+    /// checked in for a minute, although a runner list still calls both
+    /// reachable. The computer says what the server will say.
+    func testAComputerIsOnlineByTheRuleForStartingASession() async throws {
+        let now = ISO8601Dates.string(from: Date())
+        let ninetySecondsAgo = ISO8601Dates.string(from: Date().addingTimeInterval(-90))
+        StubURLProtocol.stub("user/runners", status: 200, body: """
+        [{"id":"run-1","name":"ready","status":"online","last_seen_at":"\(now)","agent_harnesses":["claude"]},
+         {"id":"run-2","name":"paused","status":"paused","last_seen_at":"\(now)","agent_harnesses":["claude"]},
+         {"id":"run-3","name":"quiet","status":"online","last_seen_at":"\(ninetySecondsAgo)",
+          "agent_harnesses":["claude"]}]
+        """)
+
+        let computers = try await makeGitboy().computers()
+
+        XCTAssertEqual(computers.map(\.name), ["ready", "paused", "quiet"])
+        XCTAssertEqual(computers.map(\.isOnline), [true, false, false])
+        XCTAssertTrue(computers[2].runner.isOnline, "The runner list's looser window still applies there")
     }
 
     func testAgentSessionsOnAnIssueMapTheLifecycleRow() async throws {
@@ -467,6 +504,33 @@ extension ForgeAdditionsTests {
         guard case .unauthorized = failure as? ForgeError else {
             return XCTFail("Expected .unauthorized, got \(String(describing: failure))")
         }
+    }
+
+    /// A job removed while its log is being read closes the stream with
+    /// `deleted`, which is not a status a job can finish in.
+    func testLiveLogOfADeletedJobEndsAsNotFound() async {
+        ForgeHeaderRecorder.reset(status: 200, body: """
+        event: done
+        data: {"status":"deleted"}
+        """)
+        let client = GitboyClient(host: .testGitboy, token: "gb-secret",
+                                  session: ForgeHeaderRecorder.session())
+        let run = ForgeRun(repo: repo(.testGitboy), runID: "7", number: 7, title: "Pipeline #7",
+                           workflow: nil, branch: "main", sha: "sha-7", event: "push", actor: "octo",
+                           status: .running, createdAt: nil, updatedAt: nil,
+                           webURL: URL(string: "https://gitboy.example.com/octo/app/pipelines/7")!)
+        let job = ForgeJob(run: run, jobID: "j1", name: "build", stage: "build", status: .running,
+                           attempt: 1, allowFailure: false, failureReason: nil, startedAt: nil,
+                           finishedAt: nil, runnerName: nil,
+                           webURL: URL(string: "https://gitboy.example.com/octo/app/pipelines/7?job=j1")!)
+
+        var failure: Error?
+        do {
+            for try await _ in client.liveLog(of: job) {}
+        } catch {
+            failure = error
+        }
+        XCTAssertEqual(failure as? ForgeError, .notFound)
     }
 }
 

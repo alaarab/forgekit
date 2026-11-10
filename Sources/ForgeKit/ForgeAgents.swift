@@ -6,16 +6,21 @@ public struct ForgeComputer: Codable, Hashable, Sendable, Identifiable {
     public let runner: ForgeRunner
     /// "claude", "codex", … in the order the computer lists them.
     public let harnesses: [String]
+    /// Whether the host would take a new session on this computer right now.
+    /// Stricter than `runner.isOnline`: the host's own rule for starting a
+    /// session decides, and a paused computer never qualifies.
+    public let isOnline: Bool
 
-    public init(runner: ForgeRunner, harnesses: [String]) {
+    /// `isOnline` defaults to "the runner is online and not paused"; a host
+    /// with a tighter rule passes its own answer.
+    public init(runner: ForgeRunner, harnesses: [String], isOnline: Bool? = nil) {
         self.runner = runner
         self.harnesses = harnesses
+        self.isOnline = isOnline ?? (runner.isOnline && !runner.isPaused)
     }
 
     public var id: String { runner.id }
     public var name: String { runner.name }
-    /// A session can only be started on a computer that is online.
-    public var isOnline: Bool { runner.isOnline }
 }
 
 /// Where an agent session is in its life. `queued`, `claimed`, `running` and

@@ -121,7 +121,15 @@ extension GitboyClient {
             let harnesses = dto.harnesses
             guard dto.capabilities?.agentV1 != false, !harnesses.isEmpty,
                   let runner = mapping.runner(from: dto) else { return nil }
-            return ForgeComputer(runner: runner, harnesses: harnesses)
+            // gitboy starts a session only on a computer whose status is
+            // exactly "online" and that checked in within the last minute. A
+            // runner list is looser (two minutes, and paused still counts as
+            // reachable), so the session rule is applied here.
+            let fresh = runner.lastSeenAt.map {
+                mapping.now().timeIntervalSince($0) <= Self.agentOnlineWindow
+            } == true
+            let online = (dto.status ?? "").lowercased() == "online" && fresh
+            return ForgeComputer(runner: runner, harnesses: harnesses, isOnline: online)
         }
     }
 
@@ -193,6 +201,10 @@ extension GitboyClient {
 // MARK: - Internals
 
 extension GitboyClient {
+    /// How recently a computer must have checked in for gitboy to start a
+    /// session on it.
+    static let agentOnlineWindow: TimeInterval = 60
+
     /// gitboy's session status words. A word this client doesn't know is
     /// `running`: it is not a terminal state, so a screen keeps refreshing.
     static func agentStatus(_ raw: String?) -> ForgeAgentStatus {
