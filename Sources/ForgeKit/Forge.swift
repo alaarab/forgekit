@@ -168,15 +168,27 @@ public struct ForgeCapabilities: OptionSet, Sendable, Hashable {
     public static let pullDiffs     = ForgeCapabilities(rawValue: 1 << 12)
     /// Send an issue to an agent on one of the user's computers.
     public static let agentSessions = ForgeCapabilities(rawValue: 1 << 13)
+    /// Start a workflow or pipeline on a branch.
+    public static let startRuns     = ForgeCapabilities(rawValue: 1 << 14)
+    /// Merge a pull request by itself once its checks and reviews allow.
+    public static let autoMerge     = ForgeCapabilities(rawValue: 1 << 15)
+    /// Bring a pull request's branch up to date with its base.
+    public static let updateBranch  = ForgeCapabilities(rawValue: 1 << 16)
+    /// Mark a draft pull request ready for review.
+    public static let markReady     = ForgeCapabilities(rawValue: 1 << 17)
 
+    /// Everything GitHub can do with ForgeKit's own transport. `GitHubForge`
+    /// leaves out what the transport it was given cannot do.
     public static let github: ForgeCapabilities = [
         .issues, .pipelines, .rerunWholeRun, .retryFailed, .runners,
         .pullRequests, .pullComments, .pullDiffs,
+        .startRuns, .autoMerge, .updateBranch, .markReady,
     ]
     public static let gitboy: ForgeCapabilities = [
         .issues, .pipelines, .liveLogs, .retryFailed, .runners, .pauseRunners,
         .pullRequests, .cancelJob, .playJob, .accountRunners,
         .pullComments, .pullDiffs, .agentSessions,
+        .startRuns, .autoMerge, .updateBranch, .markReady,
     ]
 }
 
@@ -303,6 +315,26 @@ public protocol Forge: Sendable {
                            harness: String) async throws -> ForgeAgentSession
     /// Cancel an agent session that has not finished.
     func cancel(_ session: ForgeAgentSession) async throws -> ForgeAgentSession
+
+    // Added in 0.3.0.
+
+    /// What a person can start in `repo`, read at `ref` (nil: the default branch).
+    func workflows(in repo: ForgeRepo, ref: String?) async throws -> [ForgeWorkflow]
+    /// Start `workflow` on `ref`, a branch or tag name. Answers the new run
+    /// when the host says which one it started, nil when it only accepts the
+    /// request and the run appears in the list a moment later.
+    func start(_ workflow: ForgeWorkflow, ref: String, inputs: [String: String]) async throws -> ForgeRun?
+    /// Merge `pull` by `method` as soon as its checks and reviews allow, but
+    /// only if the head is still `expectedHeadSHA`.
+    func enableAutoMerge(_ pull: ForgePullRequest, method: ForgeMergeMethod,
+                         expectedHeadSHA: String) async throws
+    /// Take a queued merge back.
+    func disableAutoMerge(_ pull: ForgePullRequest) async throws
+    /// Bring the pull request's branch up to date with its base, but only if
+    /// the head is still `expectedHeadSHA`.
+    func updateBranch(of pull: ForgePullRequest, expectedHeadSHA: String) async throws
+    /// Mark a draft ready for review.
+    func markReady(_ pull: ForgePullRequest) async throws
 }
 
 extension Forge {
@@ -341,5 +373,31 @@ extension Forge {
 
     public func cancel(_ session: ForgeAgentSession) async throws -> ForgeAgentSession {
         try refuse("cancel an agent session")
+    }
+
+    public func workflows(in repo: ForgeRepo, ref: String?) async throws -> [ForgeWorkflow] {
+        try refuse("list what can be started")
+    }
+
+    public func start(_ workflow: ForgeWorkflow, ref: String,
+                      inputs: [String: String]) async throws -> ForgeRun? {
+        try refuse("start a run")
+    }
+
+    public func enableAutoMerge(_ pull: ForgePullRequest, method: ForgeMergeMethod,
+                                expectedHeadSHA: String) async throws {
+        let _: Void = try refuse("merge a pull request by itself")
+    }
+
+    public func disableAutoMerge(_ pull: ForgePullRequest) async throws {
+        let _: Void = try refuse("merge a pull request by itself")
+    }
+
+    public func updateBranch(of pull: ForgePullRequest, expectedHeadSHA: String) async throws {
+        let _: Void = try refuse("update a pull request's branch")
+    }
+
+    public func markReady(_ pull: ForgePullRequest) async throws {
+        let _: Void = try refuse("mark a pull request ready")
     }
 }

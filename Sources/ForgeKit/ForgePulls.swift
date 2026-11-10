@@ -157,12 +157,14 @@ public struct ForgePullRequestDetail: Codable, Hashable, Sendable {
     public let deletions: Int?
     public let changedFiles: Int?
     public let comments: Int?
+    /// The merge that is queued to happen by itself; nil when none is.
+    public let autoMerge: ForgeAutoMerge?
 
     public init(pull: ForgePullRequest, body: String, headSHA: String,
                 reviews: [ForgeReview], reviewDecision: ForgeReviewDecision?,
                 mergeability: ForgeMergeability, checks: [ForgeCheck],
                 commits: Int?, additions: Int?, deletions: Int?,
-                changedFiles: Int?, comments: Int?) {
+                changedFiles: Int?, comments: Int?, autoMerge: ForgeAutoMerge? = nil) {
         self.pull = pull
         self.body = body
         self.headSHA = headSHA
@@ -175,6 +177,23 @@ public struct ForgePullRequestDetail: Codable, Hashable, Sendable {
         self.deletions = deletions
         self.changedFiles = changedFiles
         self.comments = comments
+        self.autoMerge = autoMerge
+    }
+}
+
+/// A merge the host will make by itself once the pull request's checks and
+/// reviews allow it.
+public struct ForgeAutoMerge: Codable, Hashable, Sendable {
+    public let method: ForgeMergeMethod?
+    /// Who queued it.
+    public let requestedBy: String?
+    /// Why it has not merged yet, in the host's words, when the host says.
+    public let reason: String?
+
+    public init(method: ForgeMergeMethod?, requestedBy: String?, reason: String?) {
+        self.method = method
+        self.requestedBy = requestedBy
+        self.reason = reason
     }
 }
 

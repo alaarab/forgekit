@@ -59,3 +59,27 @@ public protocol GitHubTransport: Sendable {
     func runners(scope: ForgeRunnerScope) async throws -> [GitHubRunnerDTO]
     func removeRunner(scope: ForgeRunnerScope, runnerID: String) async throws
 }
+
+// From 0.3.0 on, new GitHub requests arrive as protocols of their own. A
+// transport that conforms gains the matching capabilities on `GitHubForge`;
+// one that does not keeps compiling, and `GitHubForge` leaves those
+// capabilities out. `GitHubHTTPTransport` conforms to all of them.
+
+/// Listing and starting workflows.
+public protocol GitHubWorkflowTransport: GitHubTransport {
+    func workflows(owner: String, repo: String) async throws -> [GitHubWorkflowDTO]
+    /// `workflowID` is the workflow's id or its file name.
+    func dispatchWorkflow(owner: String, repo: String, workflowID: String,
+                          ref: String, inputs: [String: String]) async throws
+}
+
+/// What moves a pull request along without a person watching it.
+public protocol GitHubPullAutomationTransport: GitHubTransport {
+    func updatePullBranch(owner: String, repo: String, number: Int,
+                          expectedHeadSHA: String) async throws
+    /// `method` nil turns auto-merge off. `pullNodeID` is the pull request's
+    /// GraphQL id: GitHub has no REST call for either direction.
+    func setPullAutoMerge(pullNodeID: String, method: ForgeMergeMethod?,
+                          expectedHeadSHA: String?) async throws
+    func markPullReady(pullNodeID: String) async throws
+}

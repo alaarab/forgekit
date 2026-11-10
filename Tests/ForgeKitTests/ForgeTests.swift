@@ -149,13 +149,15 @@ final class ForgeHostTests: XCTestCase {
         XCTAssertEqual(gitboy.capabilities,
                        [.issues, .pipelines, .liveLogs, .retryFailed, .runners, .pauseRunners,
                         .pullRequests, .cancelJob, .playJob, .accountRunners,
-                        .pullComments, .pullDiffs, .agentSessions])
+                        .pullComments, .pullDiffs, .agentSessions,
+                        .startRuns, .autoMerge, .updateBranch, .markReady])
         XCTAssertFalse(gitboy.capabilities.contains(.rerunWholeRun))
 
         let github = GitHubForge(client: GitHubHTTPTransport(session: StubURLProtocol.session()))
         XCTAssertEqual(github.capabilities,
                        [.issues, .pipelines, .rerunWholeRun, .retryFailed, .runners,
-                        .pullRequests, .pullComments, .pullDiffs])
+                        .pullRequests, .pullComments, .pullDiffs,
+                        .startRuns, .autoMerge, .updateBranch, .markReady])
         XCTAssertFalse(github.capabilities.contains(.liveLogs))
         XCTAssertFalse(github.capabilities.contains(.pauseRunners))
         // What a screen used to decide by asking which host it was on.

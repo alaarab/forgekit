@@ -316,3 +316,28 @@ changes the 0.2.0 version bump needs, in its own pull request.
   `agent_harnesses`. As of 2026-11-09 gitboy's `GET /api/v1/user/runners`
   leaves it out, so the list comes back empty until the server sends it.
 
+---
+
+# Moving phren-apps from 0.2.0 to 0.3.0
+
+Nothing is required beyond the pin. An app can go from 0.1.0 straight to
+0.3.0 by doing the 0.2.0 steps above with `exact: "0.3.0"`.
+
+- **`FixtureForge.capabilities`**: the presets also include `.startRuns`,
+  `.autoMerge`, `.updateBranch` and `.markReady` now. Subtract them with the
+  three from 0.2.0 until the fixture implements them.
+- **GitHub screens get the new actions only when `GitHubClient` can make the
+  requests.** `GitHubTransport` did not grow. The new requests are
+  `GitHubWorkflowTransport` (list and start workflows) and
+  `GitHubPullAutomationTransport` (update branch, auto-merge and ready for
+  review; the last two are GraphQL mutations). Until `GitHubClient` conforms,
+  or is rebuilt on `GitHubHTTPTransport`, which conforms already,
+  `GitHubForge.capabilities` leaves those four flags out and gitboy screens
+  have them alone.
+- **What a screen can add**, each gated on its flag:
+  - `forge.workflows(in:ref:)` and `forge.start(_:ref:inputs:)`.
+  - `forge.enableAutoMerge(_:method:expectedHeadSHA:)`,
+    `forge.disableAutoMerge(_:)`, and `detail.autoMerge` to show a queued
+    merge. gitboy queues a merge or a squash, not a rebase.
+  - `forge.updateBranch(of:expectedHeadSHA:)` and `forge.markReady(_:)`.
+

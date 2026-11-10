@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- **Start a run.** `workflows(in:ref:)` lists what a person can start in a
+  repository and `start(_:ref:inputs:)` starts it on a branch or tag. On
+  gitboy that is the repository's own pipeline and its Actions workflows that
+  accept a manual start, with the inputs they declare; on GitHub, the
+  workflows that are not disabled. gitboy answers with the new run; GitHub
+  accepts the request and the run appears in the list a moment later.
+- **Merge when green.** `enableAutoMerge(_:method:expectedHeadSHA:)` and
+  `disableAutoMerge(_:)` queue a merge for when checks and reviews allow it
+  and take it back. `ForgePullRequestDetail.autoMerge` says whether one is
+  queued, by whom and how.
+- **`updateBranch(of:expectedHeadSHA:)`** brings a pull request up to date
+  with its base, and **`markReady(_:)`** takes it out of draft.
+- Capability flags for each: `.startRuns`, `.autoMerge`, `.updateBranch`,
+  `.markReady`.
+
+### Changed
+
+- **New GitHub requests no longer break an app's own transport.** They are
+  separate protocols, `GitHubWorkflowTransport` and
+  `GitHubPullAutomationTransport`. `GitHubHTTPTransport` conforms to both. A
+  transport that does not keeps compiling, and `GitHubForge.capabilities`
+  leaves out what it cannot do.
+
+### Upgrading from 0.2.0
+
+- Nothing is required: every new `Forge` method has a default that refuses,
+  and `GitHubTransport` has no new requirements.
+- A `Forge` conformer that answers with the `.github` or `.gitboy` preset now
+  also claims `.startRuns`, `.autoMerge`, `.updateBranch` and `.markReady`.
+  Implement them or subtract the flags.
+- gitboy queues a merge or a squash, not a rebase; asking for a rebase is
+  refused before any request is made.
+
 ## 0.2.0
 
 ### Added

@@ -218,8 +218,10 @@ struct GitboyPullDTO: Decodable, Sendable {
     let additions: Int?
     let deletions: Int?
     let changedFiles: Int?
+    let autoMerge: GitboyAutoMergeDTO?
 
     enum CodingKeys: String, CodingKey {
+        case autoMerge = "auto_merge"
         case index, number, title, state, draft, body, reviews, status
         case authorUsername = "author_username"
         case mergedAt = "merged_at"
@@ -264,6 +266,36 @@ struct GitboyPullDTO: Decodable, Sendable {
         additions = c.lenient(.additions)
         deletions = c.lenient(.deletions)
         changedFiles = c.lenient(.changedFiles)
+        autoMerge = c.lenient(.autoMerge)
+    }
+}
+
+/// `auto_merge` on a pull request. gitboy keeps the row after the merge is
+/// made or taken back; only a pending one is a merge still to come.
+struct GitboyAutoMergeDTO: Decodable, Sendable {
+    let method: String?
+    let state: String?
+    let reason: String?
+    let actorUsername: String?
+
+    enum CodingKeys: String, CodingKey {
+        case method, state, reason
+        case actorUsername = "actor_username"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        method = c.lenient(.method)
+        state = c.lenient(.state)
+        reason = c.lenient(.reason)
+        actorUsername = c.lenient(.actorUsername)
+    }
+
+    var forgeAutoMerge: ForgeAutoMerge? {
+        guard (state ?? "").lowercased() == "pending" else { return nil }
+        return ForgeAutoMerge(method: ForgeMergeMethod(rawValue: (method ?? "").lowercased()),
+                              requestedBy: GitboyRunnerMapping.nonEmpty(actorUsername),
+                              reason: GitboyRunnerMapping.nonEmpty(reason))
     }
 }
 
@@ -418,7 +450,8 @@ extension GitboyClient {
             additions: dto.additions,
             deletions: dto.deletions,
             changedFiles: dto.changedFiles,
-            comments: dto.commentCount ?? dto.comments?.count)
+            comments: dto.commentCount ?? dto.comments?.count,
+            autoMerge: dto.autoMerge?.forgeAutoMerge)
     }
 
     public func merge(_ pull: ForgePullRequest, method: ForgeMergeMethod,
