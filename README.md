@@ -102,7 +102,7 @@ swift build
 swift test
 ```
 
-The package supports iOS 17 and macOS 14. It also builds and tests on Linux,
+The package supports iOS 16 and macOS 13. It also builds and tests on Linux,
 which is what CI's second job runs: there the Keychain is an in-memory store,
 a live log is read whole instead of streamed, and the three job-log redirect
 tests are skipped. Every push and pull request runs both jobs
