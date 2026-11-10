@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import ForgeKit
 
 /// Issues over both forges: one screen's shapes out of two JSON vocabularies,

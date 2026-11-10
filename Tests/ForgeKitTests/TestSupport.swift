@@ -1,5 +1,8 @@
 import Foundation
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Request recording and route stubbing for the forge tests. Copied from
 /// the app's GitHubClientTests so the extracted tests stay self-contained.

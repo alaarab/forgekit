@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import ForgeKit
 
 /// Snapshot of one request a forge made. `StubURLProtocol` answers bodies but

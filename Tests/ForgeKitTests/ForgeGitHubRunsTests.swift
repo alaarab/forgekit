@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import ForgeKit
 
 /// GitHub Actions through the forge layer: run paging and status mapping, the
@@ -303,10 +306,19 @@ extension ForgeGitHubRunsTests {
                              headers: ["Location": location], body: "", redirect: true)
     }
 
+    /// swift-corelibs-foundation traps when a URLProtocol answers with a
+    /// redirect, so the job-log redirect tests run on Apple platforms only.
+    private func skipWithoutRedirectStubs() throws {
+        #if canImport(FoundationNetworking)
+        throw XCTSkip("URLProtocol redirects cannot be stubbed on Linux")
+        #endif
+    }
+
     /// The 302 that answers a job-log read points at a signed blob on another
     /// host. The token must stop at api.github.com, and the second request must
     /// be a plain GET of the Location.
     func testLogFollowsTheSignedLocationWithoutTheToken() async throws {
+        try skipWithoutRedirectStubs()
         let blob = "https://objects.githubusercontent.com/signed/9001.log?token=abc"
         logRedirect(blob)
         StubURLProtocol.stub("objects.githubusercontent.com/signed/9001.log", status: 200,
@@ -326,7 +338,8 @@ extension ForgeGitHubRunsTests {
                      "The signed blob URL is the whole grant: no token may ride along")
     }
 
-    func testANonHTTPSLogLocationIsRefused() async {
+    func testANonHTTPSLogLocationIsRefused() async throws {
+        try skipWithoutRedirectStubs()
         logRedirect("http://objects.example.com/9001.log")
         do {
             _ = try await makeForge().log(of: job(run: run(id: "77"), jobID: "901"))
@@ -343,6 +356,7 @@ extension ForgeGitHubRunsTests {
     }
 
     func testLogKeepsOnlyTheLastBytesOfALongLog() async throws {
+        try skipWithoutRedirectStubs()
         let blob = "https://objects.githubusercontent.com/signed/huge.log"
         logRedirect(blob)
         let body = String(repeating: "0123456789", count: 60_000) + "THE END"

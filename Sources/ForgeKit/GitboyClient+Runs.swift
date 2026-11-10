@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // MARK: - Paths and links
 
@@ -384,7 +387,7 @@ extension GitboyClient {
             "\(Self.repoPath(job.run.repo))/jobs/\(Self.runSegment(job.jobID))/log/stream",
             query: query,
             accept: "text/event-stream", bearer: bearer)
-        let (bytes, response) = try await transport.session.bytes(
+        let (bytes, response) = try await transport.session.forgeBytes(
             for: request, delegate: GitboyRedirectPolicy(host: host))
         guard let http = response as? HTTPURLResponse else { throw ForgeError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
