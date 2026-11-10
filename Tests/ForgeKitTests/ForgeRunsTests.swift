@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import ForgeKit
 
 /// CI runs, jobs, actions and logs over gitboy: the pipeline vocabulary out of

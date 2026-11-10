@@ -44,11 +44,14 @@ struct GitboyRunnerDTO: Decodable, Sendable {
     let ephemeral: Bool?
     let busy: Bool?
     let currentJobs: [GitboyRunnerJobDTO]?
+    let agentHarnesses: [String]?
+    let capabilities: GitboyRunnerCapabilitiesDTO?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, labels, status, version, capacity, host, ephemeral, busy
+        case id, name, labels, status, version, capacity, host, ephemeral, busy, capabilities
         case lastSeenAt = "last_seen_at"
         case currentJobs = "current_jobs"
+        case agentHarnesses = "agent_harnesses"
     }
 
     init(from decoder: Decoder) throws {
@@ -64,6 +67,33 @@ struct GitboyRunnerDTO: Decodable, Sendable {
         ephemeral = c.lenient(.ephemeral)
         busy = c.lenient(.busy)
         currentJobs = c.lenient(.currentJobs)
+        agentHarnesses = c.lenient(.agentHarnesses)
+        capabilities = c.lenient(.capabilities)
+    }
+
+    /// The harnesses the runner offers, trimmed, without blanks or repeats,
+    /// in the order it lists them.
+    var harnesses: [String] {
+        var seen = Set<String>()
+        return (agentHarnesses ?? []).compactMap { raw -> String? in
+            guard let value = GitboyRunnerMapping.nonEmpty(raw), seen.insert(value).inserted else {
+                return nil
+            }
+            return value
+        }
+    }
+}
+
+/// What a runner says it can do. Only the agent flag is read; an older server
+/// sends no flags at all, and then the harness list alone decides.
+struct GitboyRunnerCapabilitiesDTO: Decodable, Sendable {
+    let agentV1: Bool?
+
+    enum CodingKeys: String, CodingKey { case agentV1 = "agent_v1" }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agentV1 = c.lenient(.agentV1)
     }
 }
 

@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import ForgeKit
 
 /// Runner fleets over both forges: gitboy's heartbeat-window status and live

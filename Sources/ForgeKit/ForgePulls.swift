@@ -185,3 +185,16 @@ public enum ForgeMergeOutcome: Equatable, Sendable {
     case refused([String])
     case headMoved
 }
+
+/// A pull request's changes as one unified diff (`git diff` text). `headSHA`
+/// is the commit the diff was computed at, when the host says: a screen that
+/// reviews from this diff pins its review to that commit.
+public struct ForgePullDiff: Codable, Hashable, Sendable {
+    public let text: String
+    public let headSHA: String?
+
+    public init(text: String, headSHA: String?) {
+        self.text = text
+        self.headSHA = headSHA
+    }
+}

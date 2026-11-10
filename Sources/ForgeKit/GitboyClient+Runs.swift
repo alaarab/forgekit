@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // MARK: - Paths and links
 
@@ -384,7 +387,7 @@ extension GitboyClient {
             "\(Self.repoPath(job.run.repo))/jobs/\(Self.runSegment(job.jobID))/log/stream",
             query: query,
             accept: "text/event-stream", bearer: bearer)
-        let (bytes, response) = try await transport.session.bytes(
+        let (bytes, response) = try await transport.session.forgeBytes(
             for: request, delegate: GitboyRedirectPolicy(host: host))
         guard let http = response as? HTTPURLResponse else { throw ForgeError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
@@ -426,6 +429,17 @@ extension GitboyClient {
             continuation.yield(.text(text))
             return false
         case .done(let status):
+            // Two of gitboy's closing words are not job statuses: the token
+            // lost its access while the log was being read, or the job is gone.
+            switch status.lowercased() {
+            case "access_revoked":
+                throw ForgeError.unauthorized("Access to this job's log was revoked.")
+            case "deleted":
+                // The job was removed while its log was being read.
+                throw ForgeError.notFound
+            default:
+                break
+            }
             continuation.yield(.finished(Self.runStatus(status)))
             continuation.finish()
             return true

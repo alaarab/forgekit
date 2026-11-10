@@ -234,10 +234,16 @@ extension GitboyClient {
     }
 
     public func comment(on issue: ForgeIssue, body: String) async throws -> ForgeComment {
+        try await postComment(repo: issue.repo, number: issue.number, body: body)
+    }
+
+    /// gitboy keeps an issue's and a pull request's conversation behind the
+    /// same route, keyed by the number they share.
+    func postComment(repo: ForgeRepo, number: Int, body: String) async throws -> ForgeComment {
         let bearer = try authorization()
         let payload = try JSONSerialization.data(withJSONObject: ["body": body])
         let (data, _) = try await transport.send(
-            "\(Self.repoPath(issue.repo))/issues/\(issue.number)/comments",
+            "\(Self.repoPath(repo))/issues/\(number)/comments",
             method: "POST", body: payload, bearer: bearer)
         guard let dto = try? JSONDecoder().decode(GitboyIssueCommentDTO.self, from: data),
               let comment = dto.forgeComment else {

@@ -238,3 +238,81 @@ PhrenKit's forge tests move with ForgeKit and are deleted from PhrenKit:
 `GitHubClientTests.swift`; ForgeKit carries its own copy in
 `Tests/ForgeKitTests/TestSupport.swift`, so PhrenKit's
 `GitHubClientTests.swift` keeps its version for the client tests that stayed.
+
+---
+
+# Moving phren-apps from 0.1.0 to 0.2.0
+
+Everything above describes the 0.1.0 adoption, which is done. These are the
+changes the 0.2.0 version bump needs, in its own pull request.
+
+## Required
+
+1. **Bump the pin** to `exact: "0.2.0"` in `PhrenKit/Package.swift`,
+   `PhrenLive/Package.swift` and `project.yml`.
+
+2. **Add `pullDiff` to `GitHubClient`.** `GitHubTransport` has one new
+   requirement. In `GitHubClient+Pulls.swift`:
+
+   ```swift
+   public func pullDiff(owner: String, repo: String, number: Int) async throws -> String {
+       let path = try Self.repoPath(owner: owner, repo: repo) + "/pulls/\(number)"
+       let (data, http) = try await request(path, accept: "application/vnd.github.diff")
+       try Self.ensureOK(http, data: data, path: path)
+       return String(decoding: data, as: UTF8.self)
+   }
+   ```
+
+3. **Error wording in tests.** Any test that asserts "You're not signed in to
+   this gitboy host.", "Your gitboy token needs the … scope." or "The forge
+   sent a response Phren couldn't read." needs the new sentences (`Forge.swift`,
+   `ForgeError.errorDescription`).
+
+4. **Narrow `FixtureForge.capabilities`.** It answers with the `.github` or
+   `.gitboy` preset, and the presets now include `.pullComments`, `.pullDiffs`
+   and `.agentSessions`. `FixtureForge` keeps compiling, because every new
+   `Forge` method has a default implementation, but those defaults refuse. So
+   until the fixture implements them, subtract the three flags; otherwise the
+   first screen that gates on one shows a control the demo cannot back.
+
+## What the app can now delete or simplify
+
+- **GitHub errors.** `GitHubForge` throws `ForgeError`, so the screens'
+  `ForgeError` handling (`ForgeRetryView`, `ForgeRunnersView.accessSentence`)
+  now sees GitHub failures too. Two limits:
+  - GitHub does not name the scope it wants, so a GitHub 403 arrives as
+    `.unauthorized` with GitHub's message, never as `.missingScope`. The
+    "Required scope" link stays gitboy-only.
+  - Keep the 403/404 rewrite in `GitHubClient+Runners.swift`. It is what
+    gives the runners screen its "You need admin access…" sentence; without
+    it a 404 there arrives with the general repository-access explanation.
+- **Host checks become capability checks.**
+  - `ForgeRunDetailView`: job cancel and play are `.cancelJob` and `.playJob`.
+  - `ForgeHubView`: the account-wide runners link is `.accountRunners`.
+  - `ForgeRepoView`: the pull requests row is `.pullRequests`.
+- **Pasted tokens.** `GitboySignInView` saves a pasted token with
+  `scopes: []`. Call `GitboyClient.tokenInfo()` after `currentUser()` and save
+  its scopes and expiry instead. It needs `read:user` and answers nil when the
+  host cannot tell which token this is, so treat a thrown error or nil as
+  "scopes unknown" (`try?`), not as a failed sign-in.
+- **The second copy of the GitHub client.** `GitHubHTTPTransport` now has
+  what `GitHubClient.request` added on top of it: `preflight` (pass
+  `{ try DemoGate.check() }`) and `etagKey`. `request`, `get`, `ensureOK`,
+  `encodePath` and `repoPath` are public. `GitHubClient` can become an
+  extension of `GitHubHTTPTransport` that adds only what ForgeKit does not
+  have (`headSha`, `tree`, `blob`, `putFile`, `deleteFile`, `probeStore`, the
+  GitHub App installation calls), and the duplicated endpoint files
+  (`GitHubClient+Issues/Pulls/Actions/Runners.swift`) can be deleted.
+
+## New screens the layer can now back
+
+- The pull request conversation: `forge.comments(on:)`, `forge.comment(on:body:)`.
+- The pull request's changes: `forge.diff(of:)` returns unified diff text.
+- Agent sessions on gitboy: `forge.computers()`, `forge.agentSessions(on:)`,
+  `forge.startAgentSession(on:computer:harness:)`, `forge.cancel(_:)`,
+  `forge.myAgentSessions()`. Gate them on `.agentSessions`.
+
+  `computers()` needs a gitboy server whose runner list includes
+  `agent_harnesses`. As of 2026-11-09 gitboy's `GET /api/v1/user/runners`
+  leaves it out, so the list comes back empty until the server sends it.
+

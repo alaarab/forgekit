@@ -73,4 +73,13 @@ extension GitHubHTTPTransport {
         let (data, http) = try await request(path, method: "POST", body: payload)
         try Self.ensureOK(http, data: data, method: "POST", path: path)
     }
+
+    /// GitHub answers the pull request itself as a diff when asked for the
+    /// diff media type. A diff past its size limit is refused with a 406.
+    public func pullDiff(owner: String, repo: String, number: Int) async throws -> String {
+        let path = try Self.repoPath(owner: owner, repo: repo) + "/pulls/\(number)"
+        let (data, http) = try await request(path, accept: "application/vnd.github.diff")
+        try Self.ensureOK(http, data: data, path: path)
+        return String(decoding: data, as: UTF8.self)
+    }
 }

@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import ForgeKit
 
 /// Snapshot of one request a forge made. `StubURLProtocol` answers bodies but
@@ -144,14 +147,22 @@ final class ForgeHostTests: XCTestCase {
     func testCapabilitiesDifferPerHost() {
         let gitboy = GitboyClient(host: .testGitboy, token: nil)
         XCTAssertEqual(gitboy.capabilities,
-                       [.issues, .pipelines, .liveLogs, .retryFailed, .runners, .pauseRunners])
+                       [.issues, .pipelines, .liveLogs, .retryFailed, .runners, .pauseRunners,
+                        .pullRequests, .cancelJob, .playJob, .accountRunners,
+                        .pullComments, .pullDiffs, .agentSessions])
         XCTAssertFalse(gitboy.capabilities.contains(.rerunWholeRun))
 
         let github = GitHubForge(client: GitHubHTTPTransport(session: StubURLProtocol.session()))
         XCTAssertEqual(github.capabilities,
-                       [.issues, .pipelines, .rerunWholeRun, .retryFailed, .runners])
+                       [.issues, .pipelines, .rerunWholeRun, .retryFailed, .runners,
+                        .pullRequests, .pullComments, .pullDiffs])
         XCTAssertFalse(github.capabilities.contains(.liveLogs))
         XCTAssertFalse(github.capabilities.contains(.pauseRunners))
+        // What a screen used to decide by asking which host it was on.
+        for gitboyOnly: ForgeCapabilities in [.cancelJob, .playJob, .accountRunners, .agentSessions] {
+            XCTAssertTrue(gitboy.capabilities.contains(gitboyOnly))
+            XCTAssertFalse(github.capabilities.contains(gitboyOnly))
+        }
         XCTAssertEqual(github.host, .github)
     }
 }
@@ -335,7 +346,21 @@ final class GitboyClientTests: XCTestCase {
 
     func testMissingScopeErrorSaysWhatToFix() {
         XCTAssertEqual(ForgeError.missingScope("read:issue").errorDescription,
-                       "Your gitboy token needs the read:issue scope.")
+                       "Your token needs the read:issue scope.")
+    }
+
+    /// The same errors are shown on GitHub screens and in other apps, so the
+    /// shared wording names neither a host kind nor an app.
+    func testSharedErrorWordingNamesNoHostKindOrApp() {
+        let shared: [ForgeError] = [.notSignedIn, .unauthorized(""), .missingScope("read:repo"),
+                                    .notFound, .rateLimited(until: nil), .conflict(""),
+                                    .server(status: 500, message: ""), .invalidResponse]
+        for error in shared {
+            let text = error.errorDescription ?? ""
+            XCTAssertFalse(text.isEmpty, "\(error)")
+            XCTAssertNil(text.range(of: "gitboy", options: .caseInsensitive), text)
+            XCTAssertNil(text.range(of: "phren", options: .caseInsensitive), text)
+        }
     }
 }
 
@@ -380,6 +405,25 @@ final class GitboyDeviceFlowTests: XCTestCase {
         for scope in GitboyDeviceFlow.scopes {
             XCTAssertTrue(body.contains(scope), body)
         }
+    }
+
+    /// Another app signs in under its own name and asks for its own scopes.
+    func testRequestCodeSendsTheAppsOwnNameAndScopes() async throws {
+        StubURLProtocol.stub("auth/device/code", status: 200, body: """
+        {"device_code":"device-1","user_code":"ABCD-1234",
+         "verification_uri":"https://gitboy.example.com/device","expires_in":600,"interval":5}
+        """)
+        let flow = GitboyDeviceFlow(host: .testGitboy, session: StubURLProtocol.session(),
+                                    clientName: "Example for iPad",
+                                    scopes: ["read:user", "write:user", "read:org"])
+
+        _ = try await flow.requestCode()
+
+        let body = try XCTUnwrap(StubURLProtocol.bodies.last)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        XCTAssertEqual(json["client_name"] as? String, "Example for iPad")
+        XCTAssertEqual(json["scopes"] as? [String], ["read:user", "write:user", "read:org"])
+        XCTAssertFalse(body.contains(GitboyDeviceFlow.clientName), body)
     }
 
     func testPollAuthorizedSplitsScopesAndParsesExpiry() async throws {
@@ -625,6 +669,28 @@ final class ForgeCredentialStoreTests: XCTestCase {
         default:
             XCTFail("Expected the replacement credential back")
         }
+    }
+
+    /// Two apps on one device each file their accounts under their own
+    /// Keychain service and never see the other's.
+    func testStoresUnderDifferentServicesDoNotShareAccounts() throws {
+        let first = ForgeKeychainCredentialStore(service: "com.example.forgekit.tests.first")
+        let second = ForgeKeychainCredentialStore(service: "com.example.forgekit.tests.second")
+        let credential = ForgeCredential(host: .testGitboy, token: "first-token", user: nil,
+                                         scopes: ["read:repo"], expiresAt: nil, source: .pastedToken)
+        do {
+            try first.save(credential)
+        } catch {
+            try skipIfKeychainUnavailable(error)
+        }
+        defer { try? first.delete(.testGitboy) }
+
+        XCTAssertEqual(first.read(.testGitboy), .found(credential))
+        XCTAssertEqual(first.storedHosts(), [.testGitboy])
+        XCTAssertEqual(second.read(.testGitboy), .missing)
+        XCTAssertEqual(second.storedHosts(), [])
+        XCTAssertEqual(ForgeKeychainCredentialStore.default.service, "com.phren.ios.forge",
+                       "Phren's saved credentials stay where they were written")
     }
 
     /// The SPM test host is not always entitled for Keychain access, and a

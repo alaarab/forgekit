@@ -6,9 +6,11 @@ import FoundationNetworking
 /// A small URLSession-backed GitHub REST transport: exactly the requests
 /// `GitHubForge` makes, with a bearer token and origin-pinned redirects.
 ///
-/// This is the client ForgeKit can use alone. A host app that already has a
-/// A host app's existing GitHub client can conform that instead; see
-/// `PHRENKIT_ADAPTER.md`.
+/// This is the client ForgeKit can use alone. An app with GitHub requests of
+/// its own (file contents, refs, sign-in) builds them on the public `request`
+/// and `get` in an extension, so there is one copy of the auth, redirect and
+/// throttling rules. An app's existing client can conform to
+/// `GitHubTransport` instead; see `PHRENKIT_ADAPTER.md`.
 public actor GitHubHTTPTransport: GitHubTransport {
     /// Trailing slash matters: relative paths resolve against it directly,
     /// avoiding `//`-doubling from appendingPathComponent normalization.
@@ -16,10 +18,18 @@ public actor GitHubHTTPTransport: GitHubTransport {
 
     private let session: URLSession
     private var token: String?
+    /// Runs before every request; throwing refuses it. An app's demo mode
+    /// uses this to keep sample screens off the network.
+    private let preflight: (@Sendable () throws -> Void)?
+    /// ETag cache for conditional requests: an answer of 304 does not count
+    /// against the REST rate limit.
+    private var etags: [String: String] = [:]
 
-    public init(session: URLSession = GitHubHTTPTransport.privateSession(), token: String? = nil) {
+    public init(session: URLSession = GitHubHTTPTransport.privateSession(), token: String? = nil,
+                preflight: (@Sendable () throws -> Void)? = nil) {
         self.session = session
         self.token = token
+        self.preflight = preflight
     }
 
     /// The same session, exposed to the other transport extensions (job logs
@@ -36,6 +46,8 @@ public actor GitHubHTTPTransport: GitHubTransport {
 
     public func setToken(_ token: String?) {
         self.token = token
+        // An ETag belongs to what the old token could see.
+        etags.removeAll()
     }
 
     // MARK: - Request plumbing
@@ -43,7 +55,7 @@ public actor GitHubHTTPTransport: GitHubTransport {
     /// Dynamic values are path data, never URL syntax. In particular, Git
     /// permits `#` and `%` in branch names; resolving those raw reads another
     /// ref while contents writes still use the original branch from JSON.
-    static func encodePath(_ value: String, nested: Bool = false) throws -> String {
+    public static func encodePath(_ value: String, nested: Bool = false) throws -> String {
         let parts = value.split(separator: "/", omittingEmptySubsequences: false)
         guard (nested || parts.count == 1),
               parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
@@ -59,13 +71,13 @@ public actor GitHubHTTPTransport: GitHubTransport {
         }.joined(separator: "/")
     }
 
-    static func repoPath(owner: String, repo: String) throws -> String {
+    public static func repoPath(owner: String, repo: String) throws -> String {
         try "repos/\(encodePath(owner))/\(encodePath(repo))"
     }
 
     /// `method`/`path` are carried into the error so `errorDescription` can
     /// explain a 403/404 as the token-scope problem it usually is.
-    static func ensureOK(_ http: HTTPURLResponse, data: Data,
+    public static func ensureOK(_ http: HTTPURLResponse, data: Data,
                          method: String = "GET", path: String? = nil) throws {
         guard (200..<300).contains(http.statusCode) else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
@@ -74,10 +86,19 @@ public actor GitHubHTTPTransport: GitHubTransport {
         }
     }
 
+    /// One authenticated API request. The answer is returned whatever its
+    /// status (throttling aside), so a caller can read a 304, a 404 or a 409
+    /// as the outcome it is; `ensureOK` turns the rest into errors.
+    ///
+    /// `etagKey` makes the request conditional: the ETag last seen under that
+    /// key is sent as `If-None-Match`, and the new one is remembered. A 304
+    /// has no body, so the caller keeps what the last 200 carried.
     @discardableResult
-    func request(_ path: String, method: String = "GET",
-                 accept: String = "application/vnd.github+json",
-                 body: Data? = nil) async throws -> (Data, HTTPURLResponse) {
+    public func request(_ path: String, method: String = "GET",
+                        accept: String = "application/vnd.github+json",
+                        etagKey: String? = nil,
+                        body: Data? = nil) async throws -> (Data, HTTPURLResponse) {
+        try preflight?()
         guard let token else { throw GitHubError.notAuthenticated }
         // Not appendingPathComponent — several paths carry query strings
         // ("?recursive=1"), which it would percent-encode.
@@ -90,6 +111,9 @@ public actor GitHubHTTPTransport: GitHubTransport {
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue(accept, forHTTPHeaderField: "Accept")
         req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        if let etagKey, let etag = etags[etagKey] {
+            req.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
         if let body {
             req.httpBody = body
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -101,6 +125,9 @@ public actor GitHubHTTPTransport: GitHubTransport {
         if http.statusCode == 403 || http.statusCode == 429,
            let throttled = Self.rateLimitError(http, data: data) {
             throw throttled
+        }
+        if let etagKey, let etag = http.value(forHTTPHeaderField: "Etag") {
+            etags[etagKey] = etag
         }
         return (data, http)
     }
@@ -116,7 +143,7 @@ public actor GitHubHTTPTransport: GitHubTransport {
     /// `x-ratelimit-reset` rides *every* response, so it is read for timing
     /// but never used as the signal — treating its presence as throttling
     /// would relabel every permissions 403 as a rate limit.
-    static func rateLimitError(_ http: HTTPURLResponse, data: Data) -> GitHubError? {
+    public static func rateLimitError(_ http: HTTPURLResponse, data: Data) -> GitHubError? {
         let reset = http.value(forHTTPHeaderField: "x-ratelimit-reset")
             .flatMap(TimeInterval.init)
             .map { Date(timeIntervalSince1970: $0) }
@@ -140,7 +167,7 @@ public actor GitHubHTTPTransport: GitHubTransport {
         return nil
     }
 
-    func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
+    public func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
         let (data, http) = try await request(path)
         try Self.ensureOK(http, data: data, path: path)
         return try JSONDecoder().decode(T.self, from: data)
