@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.4
+
+### Added
+
+- `GitboyDeviceFlow.poll(deviceCode:currentInterval:)` is public, for an app
+  that runs its own poll loop: a `slow_down` without an interval adds 5
+  seconds to the interval it passes.
+
 ## 0.3.3
 
 ### Changed
