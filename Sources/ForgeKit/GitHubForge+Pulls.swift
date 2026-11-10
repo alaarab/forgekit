@@ -146,10 +146,10 @@ extension GitHubForge {
         case 405, 422:
             return .refused([message ?? Self.mergeFallback])
         default:
-            throw GitHubError.http(status: http.statusCode,
-                                   message: message ?? "request failed",
-                                   method: "PUT",
-                                   path: "repos/\(owner)/\(name)/pulls/\(pull.number)/merge")
+            throw ForgeError(GitHubError.http(status: http.statusCode,
+                                              message: message ?? "request failed",
+                                              method: "PUT",
+                                              path: "repos/\(owner)/\(name)/pulls/\(pull.number)/merge"))
         }
     }
 
@@ -161,6 +161,31 @@ extension GitHubForge {
                                           event: Self.event(verdict),
                                           body: body,
                                           expectedHeadSHA: expectedHeadSHA)
+    }
+}
+
+// MARK: - Conversation and changes
+
+extension GitHubForge {
+    /// GitHub keeps a pull request's conversation as issue comments under the
+    /// number the two share. Review comments on the diff are not part of it.
+    public func comments(on pull: ForgePullRequest) async throws -> [ForgeComment] {
+        let rows = try await client.issueComments(owner: pull.repo.owner, repo: pull.repo.name,
+                                                  number: pull.number)
+        return rows.map { $0.forgeComment }
+    }
+
+    public func comment(on pull: ForgePullRequest, body: String) async throws -> ForgeComment {
+        let dto = try await client.createIssueComment(owner: pull.repo.owner, repo: pull.repo.name,
+                                                      number: pull.number, body: body)
+        return dto.forgeComment
+    }
+
+    /// GitHub's diff does not say which commit it was computed at.
+    public func diff(of pull: ForgePullRequest) async throws -> ForgePullDiff {
+        let text = try await client.pullDiff(owner: pull.repo.owner, repo: pull.repo.name,
+                                             number: pull.number)
+        return ForgePullDiff(text: text, headSHA: nil)
     }
 }
 

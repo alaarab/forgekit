@@ -155,11 +155,29 @@ public struct ForgeCapabilities: OptionSet, Sendable, Hashable {
     public static let retryFailed   = ForgeCapabilities(rawValue: 1 << 4)
     public static let runners       = ForgeCapabilities(rawValue: 1 << 5)
     public static let pauseRunners  = ForgeCapabilities(rawValue: 1 << 6)
+    public static let pullRequests  = ForgeCapabilities(rawValue: 1 << 7)
+    /// Cancel one job and leave the rest of its run going.
+    public static let cancelJob     = ForgeCapabilities(rawValue: 1 << 8)
+    /// Start a job that is waiting on a person.
+    public static let playJob       = ForgeCapabilities(rawValue: 1 << 9)
+    /// `ForgeRunnerScope.mine`: the signed-in account's own runners.
+    public static let accountRunners = ForgeCapabilities(rawValue: 1 << 10)
+    /// Read and write the conversation on a pull request.
+    public static let pullComments  = ForgeCapabilities(rawValue: 1 << 11)
+    /// Read a pull request's changes as a unified diff.
+    public static let pullDiffs     = ForgeCapabilities(rawValue: 1 << 12)
+    /// Send an issue to an agent on one of the user's computers.
+    public static let agentSessions = ForgeCapabilities(rawValue: 1 << 13)
 
-    /// github: [.issues, .pipelines, .rerunWholeRun, .retryFailed, .runners]
-    public static let github: ForgeCapabilities = [.issues, .pipelines, .rerunWholeRun, .retryFailed, .runners]
-    /// gitboy: [.issues, .pipelines, .liveLogs, .retryFailed, .runners, .pauseRunners]
-    public static let gitboy: ForgeCapabilities = [.issues, .pipelines, .liveLogs, .retryFailed, .runners, .pauseRunners]
+    public static let github: ForgeCapabilities = [
+        .issues, .pipelines, .rerunWholeRun, .retryFailed, .runners,
+        .pullRequests, .pullComments, .pullDiffs,
+    ]
+    public static let gitboy: ForgeCapabilities = [
+        .issues, .pipelines, .liveLogs, .retryFailed, .runners, .pauseRunners,
+        .pullRequests, .cancelJob, .playJob, .accountRunners,
+        .pullComments, .pullDiffs, .agentSessions,
+    ]
 }
 
 /// Everything the forge layer can fail with, worded for the user rather than
@@ -168,7 +186,7 @@ public enum ForgeError: Error, Equatable, Sendable, LocalizedError {
     case invalidHost
     case notSignedIn
     case unauthorized(String)          // 401, or 403 that is not a scope problem; message from server
-    case missingScope(String)          // e.g. "read:issue" (gitboy 403 "Token requires read:issue"; GitHub X-Accepted-OAuth-Scopes)
+    case missingScope(String)          // e.g. "read:issue" (gitboy 403 "Token requires read:issue")
     case notFound
     case rateLimited(until: Date?)
     case conflict(String)              // 409 with server message
@@ -182,12 +200,12 @@ public enum ForgeError: Error, Equatable, Sendable, LocalizedError {
         case .invalidHost:
             return "That isn't a valid gitboy address. Use a host name like git.example.com."
         case .notSignedIn:
-            return "You're not signed in to this gitboy host."
+            return "You're not signed in to this host."
         case .unauthorized(let message):
             let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? "The server rejected this token." : trimmed
         case .missingScope(let scope):
-            return "Your gitboy token needs the \(scope) scope."
+            return "Your token needs the \(scope) scope."
         case .notFound:
             return "That item wasn't found. It may have been deleted, or your token can't see it."
         case .rateLimited(let until):
@@ -203,7 +221,7 @@ public enum ForgeError: Error, Equatable, Sendable, LocalizedError {
             return trimmed.isEmpty ? "The forge returned an error (\(status))."
                                    : "The forge returned an error (\(status)): \(trimmed)"
         case .invalidResponse:
-            return "The forge sent a response Phren couldn't read."
+            return "The forge sent a response this app couldn't read."
         case .validation(let message):
             return message
         }
@@ -252,8 +270,9 @@ public protocol Forge: Sendable {
     func perform(_ action: ForgeJobAction, on job: ForgeJob) async throws
     /// The whole log so far (bounded to the last 512 KB; prefix "… earlier output trimmed\n" when trimmed).
     func log(of job: ForgeJob) async throws -> String
-    /// Live log: yields .text chunks as they arrive and ends with .finished. Hosts without .liveLogs
-    /// implement it by polling log(of:) every 3 s and yielding only the new suffix until the job is terminal.
+    /// Live log: yields .text chunks as they arrive and ends with .finished. A host without .liveLogs
+    /// has no log to read until the job ends: it yields nothing while the job runs, then the whole
+    /// log once, then .finished.
     func liveLog(of job: ForgeJob) -> AsyncThrowingStream<ForgeLogEvent, Error>
     /// The runner fleet visible to the signed-in user at `scope`.
     func runners(_ scope: ForgeRunnerScope) async throws -> [ForgeRunner]
@@ -261,4 +280,66 @@ public protocol Forge: Sendable {
     func setPaused(_ paused: Bool, runner: ForgeRunner) async throws -> ForgeRunner
     /// Remove a runner registration from its scope.
     func remove(_ runner: ForgeRunner) async throws
+
+    // Everything below was added after 0.1.0 and has a default that refuses,
+    // so a conformer written against 0.1.0 keeps compiling. Check
+    // `capabilities` before offering the control.
+
+    /// The conversation on a pull request, oldest first (the first page, up
+    /// to 100). Review verdicts are in `pullRequest(in:number:)`, not here.
+    func comments(on pull: ForgePullRequest) async throws -> [ForgeComment]
+    /// Add a conversation comment to a pull request.
+    func comment(on pull: ForgePullRequest, body: String) async throws -> ForgeComment
+    /// The pull request's changes as one unified diff.
+    func diff(of pull: ForgePullRequest) async throws -> ForgePullDiff
+    /// The signed-in user's computers that can take an agent session.
+    func computers() async throws -> [ForgeComputer]
+    /// The agent sessions on one issue, newest first.
+    func agentSessions(on issue: ForgeIssue) async throws -> [ForgeAgentSession]
+    /// The signed-in user's own agent sessions across repositories, newest first.
+    func myAgentSessions() async throws -> [ForgeAgentSession]
+    /// Send `issue` to an agent on `computer`, run by `harness` ("claude", "codex").
+    func startAgentSession(on issue: ForgeIssue, computer: ForgeComputer,
+                           harness: String) async throws -> ForgeAgentSession
+    /// Cancel an agent session that has not finished.
+    func cancel(_ session: ForgeAgentSession) async throws -> ForgeAgentSession
+}
+
+extension Forge {
+    private func refuse<T>(_ what: String) throws -> T {
+        throw ForgeError.server(status: 0, message: "This host can't \(what).")
+    }
+
+    public func comments(on pull: ForgePullRequest) async throws -> [ForgeComment] {
+        try refuse("list pull request comments")
+    }
+
+    public func comment(on pull: ForgePullRequest, body: String) async throws -> ForgeComment {
+        try refuse("comment on a pull request")
+    }
+
+    public func diff(of pull: ForgePullRequest) async throws -> ForgePullDiff {
+        try refuse("show a pull request's changes")
+    }
+
+    public func computers() async throws -> [ForgeComputer] {
+        try refuse("list computers")
+    }
+
+    public func agentSessions(on issue: ForgeIssue) async throws -> [ForgeAgentSession] {
+        try refuse("list agent sessions")
+    }
+
+    public func myAgentSessions() async throws -> [ForgeAgentSession] {
+        try refuse("list agent sessions")
+    }
+
+    public func startAgentSession(on issue: ForgeIssue, computer: ForgeComputer,
+                                  harness: String) async throws -> ForgeAgentSession {
+        try refuse("send an issue to an agent")
+    }
+
+    public func cancel(_ session: ForgeAgentSession) async throws -> ForgeAgentSession {
+        try refuse("cancel an agent session")
+    }
 }

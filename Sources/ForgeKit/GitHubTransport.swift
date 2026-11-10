@@ -41,6 +41,8 @@ public protocol GitHubTransport: Sendable {
     func submitPullReview(owner: String, repo: String, number: Int,
                           event: String, body: String,
                           expectedHeadSHA: String) async throws
+    /// The pull request's changes as one unified diff (added in 0.2.0).
+    func pullDiff(owner: String, repo: String, number: Int) async throws -> String
 
     // Actions
     func workflowRuns(owner: String, repo: String, branch: String?,

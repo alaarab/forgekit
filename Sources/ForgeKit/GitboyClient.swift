@@ -117,9 +117,7 @@ struct GitboyTransport: Sendable {
     /// split matters: "Token requires read:issue" is a scope problem a screen
     /// can offer to fix, not a revoked token.
     static func error(status: Int, headers: HTTPURLResponse, data: Data) -> ForgeError {
-        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        let raw = (json?["error"] as? String) ?? (json?["message"] as? String) ?? ""
-        let message = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = Self.message(from: data)
 
         switch status {
         case 401:
@@ -144,6 +142,16 @@ struct GitboyTransport: Sendable {
         default:
             return .server(status: status, message: message.isEmpty ? "request failed" : message)
         }
+    }
+}
+
+extension GitboyTransport {
+    /// The server's own sentence from an error body: `error`, or `message` on
+    /// the routes that answer in that shape. Empty when there is none.
+    static func message(from data: Data) -> String {
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let raw = (json?["error"] as? String) ?? (json?["message"] as? String) ?? ""
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

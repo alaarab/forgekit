@@ -429,6 +429,11 @@ extension GitboyClient {
             continuation.yield(.text(text))
             return false
         case .done(let status):
+            // gitboy ends the stream with this word when the token loses its
+            // access while the log is being read. It is not a job status.
+            if status.lowercased() == "access_revoked" {
+                throw ForgeError.unauthorized("Access to this job's log was revoked.")
+            }
             continuation.yield(.finished(Self.runStatus(status)))
             continuation.finish()
             return true

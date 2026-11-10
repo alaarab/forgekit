@@ -39,23 +39,33 @@ public protocol ForgeCredentialStoring: Sendable {
     func storedHosts() -> [ForgeHost]
 }
 
-/// Keychain storage for non-GitHub forge accounts: generic password, service
-/// "com.phren.ios.forge", account = host.id,
+/// Keychain storage for non-GitHub forge accounts: generic password, one
+/// service per app, account = host.id,
 /// kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly. Non-Security fallback =
 /// in-memory dictionary (Linux tests), same pattern as the app's KeychainStore.
 public struct ForgeKeychainCredentialStore: ForgeCredentialStoring {
+    /// The store Phren for iPhone has always used; `ForgeCredentialStore`
+    /// reads and writes it. Credentials saved before ForgeKit still load.
     public static let `default` = ForgeKeychainCredentialStore()
 
-    static let service = "com.phren.ios.forge"
+    /// Phren for iPhone's Keychain service, kept as the default so its saved
+    /// credentials need no migration.
+    public static let defaultService = "com.phren.ios.forge"
 
-    public init() {}
+    /// The Keychain service the credentials are filed under. Another app
+    /// passes its own, so two apps never read each other's accounts.
+    public let service: String
+
+    public init(service: String = ForgeKeychainCredentialStore.defaultService) {
+        self.service = service
+    }
 
 #if canImport(Security)
     public func save(_ credential: ForgeCredential) throws {
         let data = try JSONEncoder().encode(credential)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
+            kSecAttrService as String: service,
             kSecAttrAccount as String: credential.host.id,
         ]
         // An interrupted sign-in must not erase a working credential.
@@ -75,7 +85,7 @@ public struct ForgeKeychainCredentialStore: ForgeCredentialStoring {
     public func read(_ host: ForgeHost) -> ForgeCredentialStore.ReadResult {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
+            kSecAttrService as String: service,
             kSecAttrAccount as String: host.id,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
@@ -97,7 +107,7 @@ public struct ForgeKeychainCredentialStore: ForgeCredentialStoring {
     public func delete(_ host: ForgeHost) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
+            kSecAttrService as String: service,
             kSecAttrAccount as String: host.id,
         ]
         let status = SecItemDelete(query as CFDictionary)
@@ -111,7 +121,7 @@ public struct ForgeKeychainCredentialStore: ForgeCredentialStoring {
     public func storedHosts() -> [ForgeHost] {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
+            kSecAttrService as String: service,
             kSecMatchLimit as String: kSecMatchLimitAll,
             kSecReturnAttributes as String: true,
         ]
@@ -134,44 +144,45 @@ public struct ForgeKeychainCredentialStore: ForgeCredentialStoring {
     // Linux CI fallback: in-memory only. Never used by the iOS app.
     private final class MemoryBox: @unchecked Sendable {
         private let lock = NSLock()
-        private var values: [String: ForgeCredential] = [:]
+        /// service → host id → credential
+        private var values: [String: [String: ForgeCredential]] = [:]
 
-        func get(_ id: String) -> ForgeCredential? {
+        func get(_ service: String, _ id: String) -> ForgeCredential? {
             lock.lock(); defer { lock.unlock() }
-            return values[id]
+            return values[service]?[id]
         }
 
-        func set(_ credential: ForgeCredential) {
+        func set(_ service: String, _ credential: ForgeCredential) {
             lock.lock(); defer { lock.unlock() }
-            values[credential.host.id] = credential
+            values[service, default: [:]][credential.host.id] = credential
         }
 
-        func remove(_ id: String) {
+        func remove(_ service: String, _ id: String) {
             lock.lock(); defer { lock.unlock() }
-            values.removeValue(forKey: id)
+            values[service]?.removeValue(forKey: id)
         }
 
-        func ids() -> [String] {
+        func ids(_ service: String) -> [String] {
             lock.lock(); defer { lock.unlock() }
-            return Array(values.keys)
+            return Array((values[service] ?? [:]).keys)
         }
     }
     private static let memory = MemoryBox()
 
     public func save(_ credential: ForgeCredential) throws {
-        Self.memory.set(credential)
+        Self.memory.set(service, credential)
     }
 
     public func read(_ host: ForgeHost) -> ForgeCredentialStore.ReadResult {
-        Self.memory.get(host.id).map(ForgeCredentialStore.ReadResult.found) ?? .missing
+        Self.memory.get(service, host.id).map(ForgeCredentialStore.ReadResult.found) ?? .missing
     }
 
     public func delete(_ host: ForgeHost) throws {
-        Self.memory.remove(host.id)
+        Self.memory.remove(service, host.id)
     }
 
     public func storedHosts() -> [ForgeHost] {
-        Self.memory.ids().compactMap(Self.host(fromID:)).sorted { $0.id < $1.id }
+        Self.memory.ids(service).compactMap(Self.host(fromID:)).sorted { $0.id < $1.id }
     }
 #endif
 
@@ -191,7 +202,7 @@ public struct ForgeKeychainCredentialStore: ForgeCredentialStoring {
 /// wrote, so credentials saved before this extraction still load; the static
 /// methods are the API the app already calls.
 public enum ForgeCredentialStore {
-    static let service = ForgeKeychainCredentialStore.service
+    static let service = ForgeKeychainCredentialStore.defaultService
 
     public enum ReadResult: Equatable, Sendable {
         case found(ForgeCredential)

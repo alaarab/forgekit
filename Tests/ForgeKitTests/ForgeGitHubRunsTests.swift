@@ -344,7 +344,7 @@ extension ForgeGitHubRunsTests {
         do {
             _ = try await makeForge().log(of: job(run: run(id: "77"), jobID: "901"))
             XCTFail("A plain-http log location must not be followed")
-        } catch let error as GitHubError {
+        } catch let error as ForgeError {
             guard case .invalidResponse = error else {
                 return XCTFail("Expected the location to be rejected, got \(error)")
             }

@@ -504,6 +504,54 @@ extension GitboyClient {
     }
 }
 
+// MARK: - Conversation and changes
+
+extension GitboyClient {
+    /// Unlike the comments an issue detail carries, a refusal here is thrown:
+    /// the caller asked for the conversation, not for decoration.
+    public func comments(on pull: ForgePullRequest) async throws -> [ForgeComment] {
+        let bearer = try authorization()
+        let (data, _) = try await transport.send(
+            "\(Self.repoPath(pull.repo))/issues/\(pull.number)/comments", bearer: bearer)
+        guard let page = try? JSONDecoder().decode(GitboyPage<GitboyIssueCommentDTO>.self, from: data) else {
+            throw ForgeError.invalidResponse
+        }
+        return page.items.compactMap { $0.forgeComment }
+    }
+
+    public func comment(on pull: ForgePullRequest, body: String) async throws -> ForgeComment {
+        try await postComment(repo: pull.repo, number: pull.number, body: body)
+    }
+
+    public func diff(of pull: ForgePullRequest) async throws -> ForgePullDiff {
+        let bearer = try authorization()
+        let (data, _) = try await transport.send(
+            "\(Self.repoPath(pull.repo))/pulls/\(pull.number)/diff", bearer: bearer)
+        guard let dto = try? JSONDecoder().decode(GitboyPullDiffDTO.self, from: data),
+              let text = dto.diff else {
+            throw ForgeError.invalidResponse
+        }
+        let head = dto.headSHA.flatMap { $0.isEmpty ? nil : $0 }
+        return ForgePullDiff(text: text, headSHA: head)
+    }
+}
+
+struct GitboyPullDiffDTO: Decodable, Sendable {
+    let diff: String?
+    let headSHA: String?
+
+    enum CodingKeys: String, CodingKey {
+        case diff
+        case headSHA = "head_sha"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        diff = c.lenient(.diff)
+        headSHA = c.lenient(.headSHA)
+    }
+}
+
 // MARK: - Wire words and internals
 
 extension GitboyClient {
@@ -579,8 +627,8 @@ extension GitboyClient {
             URLQueryItem(name: "limit", value: "20"),
         ]
         let pipelinePath = base + "/pipelines"
-        // A repo without CI, or without read:ci, simply has no jobs to show:
-        // that must not fail the pull request itself.
+        // A repo without CI, or a token that may not read it, simply has no
+        // jobs to show: that must not fail the pull request itself.
         guard let (listData, _) = try? await transport.send(pipelinePath, query: query, bearer: bearer),
               let page = try? JSONDecoder().decode(GitboyPage<GitboyPipelineDTO>.self, from: listData),
               // An older gitboy ignores the sha filter; pick this commit's newest run.

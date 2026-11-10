@@ -23,18 +23,30 @@ public struct GitboyDeviceCode: Codable, Equatable, Sendable {
 }
 
 /// RFC 8628 device flow against a gitboy host. No client_id: the instance is
-/// identified by its own host, and scopes are fixed by `Self.scopes`.
+/// identified by its own host. The app says who it is (`clientName`, shown to
+/// the person approving the sign-in) and what it needs (`scopes`).
 public struct GitboyDeviceFlow: Sendable {
+    /// The defaults, which are the ones Phren for iPhone shipped with. Another
+    /// app passes its own name and scopes to `init`.
     public static let scopes = ["read:user", "read:repo", "write:repo", "read:issue", "write:issue"]
     public static let clientName = "Phren for iPhone"
+
+    /// The name gitboy shows on its approval page.
+    public let clientName: String
+    /// The scopes the token is asked for. gitboy never grants `admin` this way.
+    public let scopes: [String]
 
     private static let grantType = "urn:ietf:params:oauth:grant-type:device_code"
     private static let defaultSlowDownInterval = 5
 
     private let transport: GitboyTransport
 
-    public init(host: ForgeHost, session: URLSession = GitHubHTTPTransport.privateSession()) {
+    public init(host: ForgeHost, session: URLSession = GitHubHTTPTransport.privateSession(),
+                clientName: String = GitboyDeviceFlow.clientName,
+                scopes: [String] = GitboyDeviceFlow.scopes) {
         self.transport = GitboyTransport(host: host, session: session)
+        self.clientName = clientName
+        self.scopes = scopes
     }
 
     public enum PollState: Equatable, Sendable {
@@ -48,8 +60,8 @@ public struct GitboyDeviceFlow: Sendable {
     /// Step 1: ask for the code pair to display.
     public func requestCode() async throws -> GitboyDeviceCode {
         let body = try JSONSerialization.data(withJSONObject: [
-            "client_name": Self.clientName,
-            "scopes": Self.scopes,
+            "client_name": clientName,
+            "scopes": scopes,
         ])
         let (data, _) = try await transport.send("auth/device/code", method: "POST",
                                                  body: body, bearer: nil)
